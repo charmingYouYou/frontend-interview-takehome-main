@@ -1,9 +1,13 @@
 import React, { useMemo } from "react";
 import { Booking, BookingStatus } from "@/types";
-import { useAppContext } from "@/context/AppContext";
 import styles from "./RoomRow.module.css";
 
 const COLUMN_WIDTH_PX = 48;
+
+export interface HoveredCell {
+  rowId: string;
+  dayIndex: number;
+}
 
 interface RoomRowProps {
   rowId: string;
@@ -11,7 +15,12 @@ interface RoomRowProps {
   bookings: Booking[];
   visibleStartIndex: number;
   visibleEndIndex: number;
-  totalDays: number;
+  /** 时间窗起点（ISO 日期），由父级 BookingGrid 注入，避免组件直读全局 config。 */
+  dateRangeStart: string;
+  /** 当前悬停格（Grid 范围内单一事实），由父级集中维护并透传。 */
+  hoveredCell: HoveredCell | null;
+  /** 上报本行的 cell hover 变化；传 null 表示离开。 */
+  onHoverCell: (cell: HoveredCell | null) => void;
   onBookingClick: (booking: Booking) => void;
 }
 
@@ -42,9 +51,11 @@ function cx(...names: Array<string | false | null | undefined>): string {
 /**
  * RoomRow：渲染单个房型在可视时间窗内的预订情况。
  *
+ * 状态归属：本组件不再订阅 AppContext，hoveredCell 与 dateRangeStart 均由
+ *          BookingGrid 通过 props 透传，单向数据流，便于复用与单测。
  * 视觉规格：所有静态样式（颜色 / 间距 / 尺寸 / 圆角 / 动效）来自
- * RoomRow.module.css + tokens.css；仅 left/width 等几何计算结果
- * 以 inline style 注入。
+ *          RoomRow.module.css + tokens.css；仅 left/width 等几何计算结果
+ *          以 inline style 注入。
  */
 export function RoomRow({
   rowId,
@@ -53,23 +64,25 @@ export function RoomRow({
   visibleStartIndex,
   visibleEndIndex,
   totalDays,
+  dateRangeStart,
+  hoveredCell,
+  onHoverCell,
   onBookingClick,
 }: RoomRowProps) {
   console.log("render", rowId);
 
-  const { hoveredCell, setHoveredCell, config } = useAppContext();
 
   const visibleBookings = useMemo(() => {
     return bookings
       .filter((b) => {
         const startDay = Math.floor(
           (new Date(b.checkIn).getTime() -
-            new Date(config.dateRangeStart).getTime()) /
+            new Date(dateRangeStart).getTime()) /
             (1000 * 60 * 60 * 24),
         );
         const endDay = Math.floor(
           (new Date(b.checkOut).getTime() -
-            new Date(config.dateRangeStart).getTime()) /
+            new Date(dateRangeStart).getTime()) /
             (1000 * 60 * 60 * 24),
         );
         return endDay >= visibleStartIndex && startDay <= visibleEndIndex;
@@ -77,18 +90,18 @@ export function RoomRow({
       .map((b) => {
         const startDay = Math.floor(
           (new Date(b.checkIn).getTime() -
-            new Date(config.dateRangeStart).getTime()) /
+            new Date(dateRangeStart).getTime()) /
             (1000 * 60 * 60 * 24),
         );
         const endDay = Math.floor(
           (new Date(b.checkOut).getTime() -
-            new Date(config.dateRangeStart).getTime()) /
+            new Date(dateRangeStart).getTime()) /
             (1000 * 60 * 60 * 24),
         );
         const color = STATUS_COLOR_VARS[b.status] ?? STATUS_FALLBACK_COLOR;
         return { booking: b, startDay, endDay, color };
       });
-  }, [bookings, visibleStartIndex, visibleEndIndex, config.dateRangeStart]);
+  }, [bookings, visibleStartIndex, visibleEndIndex, dateRangeStart]);
 
   const isHovered = hoveredCell?.rowId === rowId;
 
@@ -113,8 +126,8 @@ export function RoomRow({
                   left: (dayIndex - visibleStartIndex) * COLUMN_WIDTH_PX,
                   width: COLUMN_WIDTH_PX,
                 }}
-                onMouseEnter={() => setHoveredCell({ rowId, dayIndex })}
-                onMouseLeave={() => setHoveredCell(null)}
+                onMouseEnter={() => onHoverCell({ rowId, dayIndex })}
+                onMouseLeave={() => onHoverCell(null)}
               />
             );
           },

@@ -1,10 +1,11 @@
-import React, { useEffect } from 'react'
+import React from 'react'
 import type { GetServerSideProps, NextPage } from 'next'
 import { useRouter } from 'next/router'
-import useSWR from 'swr'
+import useSWR, { useSWRConfig } from 'swr'
 import { Ticket } from '@/types'
-import { useMessagesContext } from '@/context/MessagesContext'
 import styles from './index.module.css'
+
+const TICKETS_KEY = '/api/tickets'
 
 interface MessagesPageProps {
   initialTicketId: string | null
@@ -25,25 +26,49 @@ function cx(...names: Array<string | false | null | undefined>): string {
  * - active / unread 状态通过条件 className 切换，避免 inline style 三元
  * - 所有静态样式来自 messages/index.module.css + tokens.css
  *
- * 行为契约（不在本次重构中改动）：SWR key、router.push 路由、
- * getServerSideProps、useMessagesContext 调用与原实现保持一致。
+ * 状态归属（本次重构调整）：原 MessagesContext 中维护的 currentHouse /
+ * activeTicketId / unreadCount 已就地下沉。activeTicketId 由 URL query
+ * 派生（已是路由真理来源），unreadCount 由 Sidebar 通过同一 SWR key
+ * 直接派生，currentHouse 同样从 query 读取。本页面因此不再需要订阅
+ * 任何全局 Context，去掉了"页面 setUnreadCount → context → Sidebar"
+ * 这条易失同步链路。
  */
 const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
   const router = useRouter()
-  const { activeTicketId, setActiveTicketId, setUnreadCount } = useMessagesContext()
-  const { data: tickets } = useSWR<Ticket[]>('/api/tickets', fetcher)
+  const { mutate } = useSWRConfig()
+  const { data: tickets } = useSWR<Ticket[]>(TICKETS_KEY, fetcher)
 
-  // Sync unread count into context
-  useEffect(() => {
-    if (tickets) {
-      setUnreadCount(tickets.filter(t => t.unread).length)
-    }
-  }, [tickets, setUnreadCount])
+  // Use ticketId from URL query, fallback to SSR initial prop
+  const currentTicketId = (router.query.ticketId as string) ?? initialTicketId
 
-  // Use ticketId from URL or prop
-  const currentTicketId = (router.query.ticketId as string) ?? initialTicketId ?? activeTicketId
+  /**
+   * 命中未读 ticket 时同步把 unread 置为已读：
+   * - 乐观更新：先在 SWR 缓存里把对应 ticket.unread 改为 false，使列表
+   *   红点与 Sidebar 徽标即时收敛，无需等待网络回环；revalidate=false
+   *   避免在请求飞行期间被新一轮 GET 覆盖回未读态；
+   * - 远端写入：POST /api/tickets/:id/read 持久化已读事实；
+   * - 真值兜底：写入完成后再触发一次 revalidate，用服务端权威数据
+   *   修正乐观值；任一步失败则回滚到先前缓存（rollbackOnError）。
+   */
+  const markTicketRead = (ticketId: string) => {
+    mutate<Ticket[]>(
+      TICKETS_KEY,
+      async (current) => {
+        await fetch(`/api/tickets/${ticketId}/read`, { method: 'POST' })
+        return current?.map(t => t.id === ticketId ? { ...t, unread: false } : t)
+      },
+      {
+        optimisticData: (current) =>
+          current?.map(t => t.id === ticketId ? { ...t, unread: false } : t) ?? [],
+        rollbackOnError: true,
+        populateCache: true,
+        revalidate: true,
+      },
+    )
+  }
 
   const handleTicketClick = (ticket: Ticket) => {
+    if (ticket.unread) markTicketRead(ticket.id)
     router.push(`/messages?ticketId=${ticket.id}&houseId=${ticket.houseId}`)
   }
 
