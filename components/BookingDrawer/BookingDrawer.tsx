@@ -26,13 +26,23 @@ function getStatusPillClass(status: BookingStatus): string {
  * 视觉规格：所有静态样式（颜色 / 间距 / 字号 / 阴影 / 圆角）来自
  * BookingDrawer.module.css + tokens.css；组件层不持有任何视觉字面量，
  * 仅通过条件 className 切换 status pill 三态。
- * 行为契约：基础数据来自父级 prop（即时渲染），附加详情通过 SWR 异步
- * 拉取（loading / 缺失态分别有占位）。
+ *
+ * 数据契约（事实来源优先级）：detail（远端权威） > booking（列表视图快照）。
+ * - booking 来自父级日历列表数据，仅作为 detail 拉取完成前的「乐观首屏」
+ *   占位，避免抽屉打开瞬间出现整面骨架屏；
+ * - 一旦 useBookingDetail 命中或加载完成，立即切换到 detail 渲染所有
+ *   共有字段（guestName / roomUnit / dates / status / totalAmount），
+ *   保证抽屉展示与服务端最新状态一致，规避列表快照与详情数据不同步
+ *   导致的视图漂移；
+ * - 通过 `const view = detail ?? booking` 统一取值，BookingDetail 继承
+ *   自 Booking，类型层无须分支即可天然兼容。
  */
 export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
   const { data: detail, isLoading } = useBookingDetail(booking?.id)
 
   if (!booking) return null
+
+  const view = detail ?? booking
 
   return (
     <div className={styles.drawer}>
@@ -46,32 +56,32 @@ export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
 
       {/* Content */}
       <div className={styles.content}>
-        {/* Always show base data immediately (from parent prop) */}
+        {/* 共有字段：detail 命中后以 detail 为准，booking 仅作首屏占位 */}
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Guest</h3>
-          <p className={styles.valuePrimary}>{booking.guestName}</p>
+          <p className={styles.valuePrimary}>{view.guestName}</p>
         </section>
 
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Room</h3>
-          <p className={styles.valueSecondary}>{booking.roomUnit.name}</p>
+          <p className={styles.valueSecondary}>{view.roomUnit.name}</p>
         </section>
 
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Dates</h3>
-          <p className={styles.valueSecondary}>{booking.checkIn} → {booking.checkOut}</p>
+          <p className={styles.valueSecondary}>{view.checkIn} → {view.checkOut}</p>
         </section>
 
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Status</h3>
-          <span className={clsx(styles.statusPill, getStatusPillClass(booking.status))}>
-            {STATUS_LABELS[booking.status] ?? booking.status}
+          <span className={clsx(styles.statusPill, getStatusPillClass(view.status))}>
+            {STATUS_LABELS[view.status] ?? view.status}
           </span>
         </section>
 
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Amount</h3>
-          <p className={styles.valueAmount}>SGD {booking.totalAmount.toLocaleString()}</p>
+          <p className={styles.valueAmount}>SGD {view.totalAmount.toLocaleString()}</p>
         </section>
 
         <div className={styles.additional}>
