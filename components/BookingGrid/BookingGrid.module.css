@@ -1,0 +1,60 @@
+/**
+ * BookingGrid 样式模块
+ *
+ * 职责：承载预订网格容器、表头（房型列 + 日期列）以及可滚动主体的所有静态样式，
+ *       仅消费 styles/tokens.css 暴露的 CSS 变量，不出现裸 hex 与魔法数字。
+ * 边界：
+ *   - 列宽（COLUMN_WIDTH_PX）、整体最小宽度（TOTAL_DAYS * COLUMN_WIDTH_PX + 140）
+ *     等依赖 JS 常量的几何值，仍由组件以 inline style 注入；
+ *   - 表头背景色 config.bookingHeaderBackground 来自 AppContext 的运行时配置，
+ *     由组件以 inline style 注入；
+ *   - 本文件只描述布局结构与视觉规格，不涉及交互态切换（无 hover / active 类）。
+ */
+
+/* 根容器：纵向排布「表头 + 滚动主体」，撑满父容器并裁掉溢出。 */
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 表头：水平排列「房型槽 + 日期列区」，底部加粗分隔线区分主体区域。 */
+.header {
+  display: flex;
+  border-bottom: 2px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+
+/* 表头房型槽：与 RoomRow 行标签等宽，作为左侧固定列的视觉对位。 */
+.headerLabel {
+  width: var(--size-row-label-width);
+  min-width: var(--size-row-label-width);
+  padding: var(--spacing-3) var(--spacing-4);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-base);
+  border-right: 1px solid var(--color-border-default);
+}
+
+/* 表头日期列区：横向铺开可视范围内的日期单元，溢出由父级裁剪。 */
+.headerDays {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+}
+
+/* 单个日期列：等宽日格，与 RoomRow 的日格栅格对齐。 */
+.headerDay {
+  padding: var(--spacing-3) var(--spacing-1);
+  font-size: var(--font-size-xs);
+  text-align: center;
+  border-right: 1px solid var(--color-border-default);
+  color: var(--color-text-tertiary);
+}
+
+/* 滚动主体：双向滚动承载所有 RoomRow，scroll 事件驱动可视范围更新。 */
+.body {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: auto;
+}

@@ -1,0 +1,23 @@
+/**
+ * _app 应用外壳样式模块
+ *
+ * 职责：定义 Next.js App 顶层的两层布局——左侧 Sidebar 与右侧主内容区
+ *       共占满视口高度，并统一收敛溢出策略。
+ * 边界：仅承载根容器与 main 槽位的几何/溢出规则；sidebar、page header、
+ *       drawer 等的样式由各自的 module.css 负责。所有视觉值消费 tokens.css。
+ */
+
+/* 应用根容器：横向排列 sidebar + main，占满视口高度，禁止根级滚动。 */
+.shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 主内容槽位：占满剩余宽度，纵向排列页面内容，溢出由内部页面接管。 */
+.main {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}

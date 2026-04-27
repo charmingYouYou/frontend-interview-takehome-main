@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { Booking, BookingStatus } from "@/types";
 import { useAppContext } from "@/context/AppContext";
+import styles from "./RoomRow.module.css";
 
 const COLUMN_WIDTH_PX = 48;
 
@@ -14,14 +15,37 @@ interface RoomRowProps {
   onBookingClick: (booking: Booking) => void;
 }
 
-const STATUS_COLORS: Record<BookingStatus, string> = {
-  confirmed: "#4CAF50",
-  pending: "#FF9800",
-  in_house: "#2196F3",
-  checked_out: "#9E9E9E",
-  cancelled: "#F44336",
+/**
+ * Booking 状态到 token 的映射。
+ *
+ * 取值统一指向 styles/tokens.css 中的 --color-status-* 变量，使颜色定义
+ * 集中在 token 层；组件只持有「状态 → 变量名」的逻辑映射，避免在组件
+ * 内重复维护 hex 字面量。
+ */
+const STATUS_COLOR_VARS: Record<BookingStatus, string> = {
+  confirmed: "var(--color-status-confirmed)",
+  pending: "var(--color-status-pending)",
+  in_house: "var(--color-status-in-house)",
+  checked_out: "var(--color-status-checked-out)",
+  cancelled: "var(--color-status-cancelled)",
 };
 
+const STATUS_FALLBACK_COLOR = "var(--color-status-fallback)";
+
+/**
+ * 拼接 className，过滤掉 falsy 值（用于条件挂载 hover 类）。
+ */
+function cx(...names: Array<string | false | null | undefined>): string {
+  return names.filter(Boolean).join(" ");
+}
+
+/**
+ * RoomRow：渲染单个房型在可视时间窗内的预订情况。
+ *
+ * 视觉规格：所有静态样式（颜色 / 间距 / 尺寸 / 圆角 / 动效）来自
+ * RoomRow.module.css + tokens.css；仅 left/width 等几何计算结果
+ * 以 inline style 注入。
+ */
 export function RoomRow({
   rowId,
   rowName,
@@ -61,7 +85,7 @@ export function RoomRow({
             new Date(config.dateRangeStart).getTime()) /
             (1000 * 60 * 60 * 24),
         );
-        const color = STATUS_COLORS[b.status] ?? "#ccc";
+        const color = STATUS_COLOR_VARS[b.status] ?? STATUS_FALLBACK_COLOR;
         return { booking: b, startDay, endDay, color };
       });
   }, [bookings, visibleStartIndex, visibleEndIndex, config.dateRangeStart]);
@@ -69,31 +93,11 @@ export function RoomRow({
   const isHovered = hoveredCell?.rowId === rowId;
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        borderBottom: "1px solid #eee",
-        background: isHovered ? "#f0f7ff" : "white",
-      }}
-    >
-      <div
-        style={{
-          width: 140,
-          minWidth: 140,
-          padding: "8px 12px",
-          fontWeight: 500,
-          fontSize: 13,
-          borderRight: "1px solid #eee",
-          background: "white",
-          zIndex: 1,
-        }}
-      >
-        {rowName}
-      </div>
+    <div className={cx(styles.row, isHovered && styles.rowHovered)}>
+      <div className={styles.label}>{rowName}</div>
 
-      <div style={{ position: "relative", height: 40, flex: 1 }}>
-        {/* Day cell backgrounds */}
+      <div className={styles.timeline}>
+        {/* 日格背景：等宽栅格，承载 cell hover 状态 */}
         {Array.from(
           { length: visibleEndIndex - visibleStartIndex + 1 },
           (_, i) => {
@@ -104,14 +108,10 @@ export function RoomRow({
             return (
               <div
                 key={dayIndex}
+                className={cx(styles.cell, isCellHovered && styles.cellHovered)}
                 style={{
-                  position: "absolute",
                   left: (dayIndex - visibleStartIndex) * COLUMN_WIDTH_PX,
                   width: COLUMN_WIDTH_PX,
-                  height: 40,
-                  background: isCellHovered ? "#e3f2fd" : "transparent",
-                  borderRight: "1px solid #f0f0f0",
-                  cursor: "default",
                 }}
                 onMouseEnter={() => setHoveredCell({ rowId, dayIndex })}
                 onMouseLeave={() => setHoveredCell(null)}
@@ -120,7 +120,7 @@ export function RoomRow({
           },
         )}
 
-        {/* Booking bars */}
+        {/* 预订条：跨日色块 */}
         {visibleBookings.map(({ booking, startDay, endDay, color }) => {
           const left = Math.max(
             0,
@@ -134,25 +134,13 @@ export function RoomRow({
           return (
             <div
               key={booking.id}
+              className={styles.bar}
               title={`${booking.guestName} (${booking.status})`}
               onClick={() => onBookingClick(booking)}
               style={{
-                position: "absolute",
                 left,
                 width: width - 2,
-                height: 28,
-                top: 6,
                 background: color,
-                borderRadius: 4,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                paddingLeft: 6,
-                fontSize: 11,
-                color: "white",
-                overflow: "hidden",
-                whiteSpace: "nowrap",
-                zIndex: 2,
               }}
             >
               {booking.guestName}

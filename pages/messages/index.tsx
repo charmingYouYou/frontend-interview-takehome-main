@@ -4,6 +4,7 @@ import { useRouter } from 'next/router'
 import useSWR from 'swr'
 import { Ticket } from '@/types'
 import { useMessagesContext } from '@/context/MessagesContext'
+import styles from './index.module.css'
 
 interface MessagesPageProps {
   initialTicketId: string | null
@@ -11,6 +12,22 @@ interface MessagesPageProps {
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
+/**
+ * 拼接 className，过滤掉 falsy 值（与 RoomRow 中 cx 同义，用于 active/unread 等状态叠加）。
+ */
+function cx(...names: Array<string | false | null | undefined>): string {
+  return names.filter(Boolean).join(' ')
+}
+
+/**
+ * Messages 页：
+ * - 左侧 ticket 列表 + 右侧消息视图的两栏布局
+ * - active / unread 状态通过条件 className 切换，避免 inline style 三元
+ * - 所有静态样式来自 messages/index.module.css + tokens.css
+ *
+ * 行为契约（不在本次重构中改动）：SWR key、router.push 路由、
+ * getServerSideProps、useMessagesContext 调用与原实现保持一致。
+ */
 const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
   const router = useRouter()
   const { activeTicketId, setActiveTicketId, setUnreadCount } = useMessagesContext()
@@ -33,16 +50,10 @@ const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
   const activeTicket = tickets?.find(t => t.id === currentTicketId)
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+    <div className={styles.page}>
       {/* Ticket list */}
-      <div style={{
-        width: 320,
-        minWidth: 320,
-        borderRight: '1px solid #e0e0e0',
-        overflowY: 'auto',
-        background: 'white',
-      }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', fontWeight: 600, fontSize: 15 }}>
+      <div className={styles.ticketList}>
+        <div className={styles.ticketListHeader}>
           Messages
         </div>
 
@@ -52,36 +63,23 @@ const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
             <div
               key={ticket.id}
               onClick={() => handleTicketClick(ticket)}
-              style={{
-                padding: '14px 20px',
-                borderBottom: '1px solid #f0f0f0',
-                cursor: 'pointer',
-                background: isActive ? '#f0f7ff' : 'white',
-                borderLeft: isActive ? '3px solid #6c63ff' : '3px solid transparent',
-              }}
+              className={cx(styles.ticketItem, isActive && styles.ticketItemActive)}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                <span style={{ fontWeight: ticket.unread ? 600 : 400, fontSize: 13 }}>
+              <div className={styles.ticketHeader}>
+                <span className={cx(styles.ticketGuest, ticket.unread && styles.ticketGuestUnread)}>
                   {ticket.guestName}
                 </span>
                 {ticket.unread && (
-                  <span style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: '#6c63ff',
-                    flexShrink: 0,
-                    marginTop: 4,
-                  }} />
+                  <span className={styles.unreadDot} />
                 )}
               </div>
-              <div style={{ fontSize: 12, color: '#555', marginBottom: 3, fontWeight: ticket.unread ? 500 : 400 }}>
+              <div className={cx(styles.ticketSubject, ticket.unread && styles.ticketSubjectUnread)}>
                 {ticket.subject}
               </div>
-              <div style={{ fontSize: 11, color: '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div className={styles.ticketPreview}>
                 {ticket.lastMessage}
               </div>
-              <div style={{ fontSize: 10, color: '#bbb', marginTop: 4 }}>
+              <div className={styles.ticketHouse}>
                 {ticket.houseName}
               </div>
             </div>
@@ -90,33 +88,19 @@ const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
       </div>
 
       {/* Message view */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className={styles.messageView}>
         {activeTicket ? (
-          <div style={{ padding: 24, flex: 1, overflowY: 'auto' }}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{activeTicket.subject}</h2>
-            <p style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>
+          <div className={styles.messageContent}>
+            <h2 className={styles.messageTitle}>{activeTicket.subject}</h2>
+            <p className={styles.messageMeta}>
               {activeTicket.guestName} · {activeTicket.houseName}
             </p>
-            <div style={{
-              padding: '12px 16px',
-              background: '#f8f8f8',
-              borderRadius: 8,
-              fontSize: 14,
-              lineHeight: 1.6,
-              maxWidth: 520,
-            }}>
+            <div className={styles.messageBubble}>
               {activeTicket.lastMessage}
             </div>
           </div>
         ) : (
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#bbb',
-            fontSize: 14,
-          }}>
+          <div className={styles.emptyState}>
             Select a message to view
           </div>
         )}

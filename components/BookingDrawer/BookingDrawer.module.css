@@ -1,0 +1,162 @@
+/**
+ * BookingDrawer 样式模块
+ *
+ * 职责：承载预订详情抽屉（容器、Header、内容区、各 section、状态 Pill、详情 Row）
+ *       的所有静态样式，仅消费 styles/tokens.css 暴露的 CSS 变量，
+ *       不出现裸 hex 与魔法数字。
+ * 边界：组件层不持有任何颜色 / 间距 / 字号 / 阴影字面量；本文件不做运行时
+ *       几何计算，也不感知业务数据（status 等通过组件挂载修饰类切换样式）。
+ *
+ * 已知例外：原 inline 样式中存在两个未在 tokens 体系中暴露的精确数值
+ *   - status pill 的纵向内边距 3px（无对应 spacing token）
+ *   - detail row 的下间距 10px（位于 spacing-3=8 与 spacing-4=12 之间）
+ * 为严格保持原视觉，暂以字面量保留并在此显式标注；后续如需统一应在
+ *   tokens.css 中扩展（如 --spacing-pill-y、--spacing-row-gap）后回填。
+ */
+
+/* 抽屉容器：右侧固定定位，承载 Header + 滚动内容区。 */
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: var(--size-drawer-width);
+  height: 100vh;
+  background: var(--color-bg-base);
+  box-shadow: var(--shadow-drawer);
+  z-index: var(--z-drawer);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header：标题与关闭按钮的横向排布槽位。 */
+.header {
+  padding: var(--spacing-5) var(--spacing-6);
+  border-bottom: 1px solid var(--color-border-default);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* 关闭按钮：去除原生按钮视觉，仅保留可点击文本。 */
+.closeButton {
+  border: none;
+  background: none;
+  font-size: var(--font-size-2xl);
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+}
+
+/* 内容区：纵向滚动容器。 */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-6);
+}
+
+/* 详情区块：每个字段一个 section，统一底部间距。 */
+.section {
+  margin-bottom: var(--spacing-6);
+}
+
+/* 区块小标题：弱色、全大写、字宽间距。 */
+.sectionTitle {
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-3);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+/* 主要文案（如 Guest 名）：略大字号 + 中等字重。 */
+.valuePrimary {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+}
+
+/* 次要文案（如 Room / Dates）。 */
+.valueSecondary {
+  font-size: var(--font-size-md);
+}
+
+/* 金额文案：常规字号 + 中等字重。 */
+.valueAmount {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+}
+
+/* 状态 Pill 基类：统一形状/排印，颜色由修饰类覆盖。 */
+.statusPill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  background: var(--color-pill-default-bg);
+  color: var(--color-pill-default-text);
+}
+
+.statusPillInHouse {
+  background: var(--color-pill-in-house-bg);
+  color: var(--color-pill-in-house-text);
+}
+
+.statusPillConfirmed {
+  background: var(--color-pill-confirmed-bg);
+  color: var(--color-pill-confirmed-text);
+}
+
+.statusPillDefault {
+  background: var(--color-pill-default-bg);
+  color: var(--color-pill-default-text);
+}
+
+/* 附加详情区：顶部分隔线 + 上内边距。 */
+.additional {
+  border-top: 1px solid var(--color-border-default);
+  padding-top: var(--spacing-5);
+  margin-top: var(--spacing-1);
+}
+
+.additionalTitle {
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-4);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+/* 加载提示：紧跟附加详情标题，弱化呈现。 */
+.loadingHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-disabled);
+  margin-left: var(--spacing-3);
+}
+
+/* 空态文案：附加详情缺失时的提示。 */
+.emptyHint {
+  font-size: var(--font-size-base);
+  color: var(--color-text-disabled);
+}
+
+/* 详情 Row：标签 + 值的横向排布；标签固定宽度避免错位。 */
+.row {
+  display: flex;
+  gap: var(--spacing-4);
+  margin-bottom: 10px;
+}
+
+.rowLabel {
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+  width: var(--size-detail-row-label-width);
+  flex-shrink: 0;
+}
+
+.rowValue {
+  font-size: var(--font-size-base);
+}

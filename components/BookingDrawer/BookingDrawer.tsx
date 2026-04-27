@@ -1,6 +1,7 @@
 import React from 'react'
 import useSWR from 'swr'
 import { Booking, BookingDetail } from '@/types'
+import styles from './BookingDrawer.module.css'
 
 interface BookingDrawerProps {
   booking: Booking | null
@@ -17,6 +18,35 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
 }
 
+/**
+ * 拼接 className，过滤掉 falsy 值（与 RoomRow 中的同名 helper 保持一致风格）。
+ */
+function cx(...names: Array<string | false | null | undefined>): string {
+  return names.filter(Boolean).join(' ')
+}
+
+/**
+ * 将 booking.status 映射到对应的状态 Pill 修饰类。
+ *
+ * 仅承担「业务状态 → 视觉修饰类」的逻辑映射，颜色与字号本身均在
+ * BookingDrawer.module.css 中通过 token 变量定义；新增状态时只需
+ * 在此处补充一行映射，无需触碰组件 JSX。
+ */
+function getStatusPillClass(status: string): string {
+  if (status === 'in_house') return styles.statusPillInHouse
+  if (status === 'confirmed') return styles.statusPillConfirmed
+  return styles.statusPillDefault
+}
+
+/**
+ * BookingDrawer：右侧固定预订详情抽屉。
+ *
+ * 视觉规格：所有静态样式（颜色 / 间距 / 字号 / 阴影 / 圆角）来自
+ * BookingDrawer.module.css + tokens.css；组件层不持有任何视觉字面量，
+ * 仅通过条件 className 切换 status pill 三态。
+ * 行为契约：基础数据来自父级 prop（即时渲染），附加详情通过 SWR 异步
+ * 拉取（loading / 缺失态分别有占位）。
+ */
 export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
   const { data: detail, isLoading } = useSWR<BookingDetail>(
     booking ? `/api/bookings/${booking.id}` : null,
@@ -26,73 +56,49 @@ export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
   if (!booking) return null
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        width: 380,
-        height: '100vh',
-        background: 'white',
-        boxShadow: '-4px 0 20px rgba(0,0,0,0.15)',
-        zIndex: 100,
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
+    <div className={styles.drawer}>
       {/* Header */}
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600 }}>Booking Detail</h2>
-        <button
-          onClick={onClose}
-          style={{ border: 'none', background: 'none', fontSize: 20, cursor: 'pointer', color: '#666' }}
-        >
+      <div className={styles.header}>
+        <h2 className={styles.title}>Booking Detail</h2>
+        <button onClick={onClose} className={styles.closeButton}>
           ×
         </button>
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+      <div className={styles.content}>
         {/* Always show base data immediately (from parent prop) */}
-        <section style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, color: '#888', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Guest</h3>
-          <p style={{ fontSize: 15, fontWeight: 500 }}>{booking.guestName}</p>
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Guest</h3>
+          <p className={styles.valuePrimary}>{booking.guestName}</p>
         </section>
 
-        <section style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, color: '#888', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Room</h3>
-          <p style={{ fontSize: 14 }}>{booking.roomUnit.name}</p>
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Room</h3>
+          <p className={styles.valueSecondary}>{booking.roomUnit.name}</p>
         </section>
 
-        <section style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, color: '#888', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Dates</h3>
-          <p style={{ fontSize: 14 }}>{booking.checkIn} → {booking.checkOut}</p>
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Dates</h3>
+          <p className={styles.valueSecondary}>{booking.checkIn} → {booking.checkOut}</p>
         </section>
 
-        <section style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, color: '#888', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Status</h3>
-          <span style={{
-            display: 'inline-block',
-            padding: '3px 10px',
-            borderRadius: 12,
-            fontSize: 12,
-            fontWeight: 500,
-            background: booking.status === 'in_house' ? '#e3f2fd' : booking.status === 'confirmed' ? '#e8f5e9' : '#f5f5f5',
-            color: booking.status === 'in_house' ? '#1565c0' : booking.status === 'confirmed' ? '#2e7d32' : '#555',
-          }}>
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Status</h3>
+          <span className={cx(styles.statusPill, getStatusPillClass(booking.status))}>
             {STATUS_LABELS[booking.status] ?? booking.status}
           </span>
         </section>
 
-        <section style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 13, color: '#888', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Amount</h3>
-          <p style={{ fontSize: 14, fontWeight: 500 }}>SGD {booking.totalAmount.toLocaleString()}</p>
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Amount</h3>
+          <p className={styles.valueAmount}>SGD {booking.totalAmount.toLocaleString()}</p>
         </section>
 
-        <div style={{ borderTop: '1px solid #eee', paddingTop: 16, marginTop: 4 }}>
-          <h3 style={{ fontSize: 13, color: '#888', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+        <div className={styles.additional}>
+          <h3 className={styles.additionalTitle}>
             Additional Details
-            {isLoading && <span style={{ fontSize: 11, color: '#aaa', marginLeft: 8 }}>loading...</span>}
+            {isLoading && <span className={styles.loadingHint}>loading...</span>}
           </h3>
 
           {detail ? (
@@ -104,7 +110,7 @@ export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
               {detail.specialRequests && <Row label="Requests" value={detail.specialRequests} />}
             </>
           ) : !isLoading ? (
-            <p style={{ fontSize: 13, color: '#aaa' }}>No additional details available.</p>
+            <p className={styles.emptyHint}>No additional details available.</p>
           ) : null}
         </div>
       </div>
@@ -112,11 +118,16 @@ export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
   )
 }
 
+/**
+ * Row：附加详情中的「标签 + 值」一行。
+ *
+ * 仅做布局承载，所有视觉规格由 BookingDrawer.module.css 提供。
+ */
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
-      <span style={{ fontSize: 13, color: '#888', width: 70, flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: 13 }}>{value}</span>
+    <div className={styles.row}>
+      <span className={styles.rowLabel}>{label}</span>
+      <span className={styles.rowValue}>{value}</span>
     </div>
   )
 }

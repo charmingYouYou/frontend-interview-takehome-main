@@ -2,7 +2,8 @@ import React from 'react'
 import { Booking, RoomUnit } from '@/types'
 import { useVisibleRange } from '@/hooks/useVisibleRange'
 import { RoomRow } from './RoomRow'
-import {useAppContext} from "@/context/AppContext";
+import { useAppContext } from "@/context/AppContext";
+import styles from "./BookingGrid.module.css";
 
 const COLUMN_WIDTH_PX = 48
 const TOTAL_DAYS = 30
@@ -13,6 +14,13 @@ interface BookingGridProps {
   onBookingClick: (booking: Booking) => void
 }
 
+/**
+ * 根据起始日期生成 totalDays 个 "M/D" 形式的日期标签。
+ *
+ * 输入：ISO 格式起始日期字符串、需要生成的天数。
+ * 输出：长度为 totalDays 的字符串数组，按日递增。
+ * 副作用：无。
+ */
 function getDayLabels(startDate: string, totalDays: number): string[] {
   return Array.from({ length: totalDays }, (_, i) => {
     const d = new Date(startDate)
@@ -21,6 +29,18 @@ function getDayLabels(startDate: string, totalDays: number): string[] {
   })
 }
 
+/**
+ * BookingGrid：预订时间网格的顶层容器。
+ *
+ * 职责：组合表头（房型槽 + 日期列）与滚动主体（多个 RoomRow），并通过
+ *       useVisibleRange 驱动横向虚拟化（仅渲染可视范围内的日期列与预订条）。
+ * 视觉规格：所有静态样式（颜色 / 间距 / 边框 / 字号）来自
+ *         BookingGrid.module.css + tokens.css；仅以下两类值仍以 inline style
+ *         注入：
+ *           - 依赖 JS 常量的几何值：列宽 COLUMN_WIDTH_PX、主体最小宽度
+ *             TOTAL_DAYS * COLUMN_WIDTH_PX + 140；
+ *           - 来自 AppContext 的动态背景色 config.bookingHeaderBackground。
+ */
 export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGridProps) {
   const { visibleRange, handleScroll } = useVisibleRange()
   const { config } = useAppContext()
@@ -29,19 +49,18 @@ export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGrid
   const dayLabels = getDayLabels(startDate, TOTAL_DAYS)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div className={styles.root}>
       {/* Header row */}
-      <div style={{ display: 'flex', borderBottom: '2px solid #ddd', background: '#fafafa' }}>
-        <div style={{ width: 140, minWidth: 140, padding: '8px 12px', fontWeight: 600, fontSize: 13, borderRight: '1px solid #eee', background: config.bookingHeaderBackground }}>
+      <div className={styles.header}>
+        <div
+          className={styles.headerLabel}
+          style={{ background: config.bookingHeaderBackground }}
+        >
           Room
         </div>
         <div
-          style={{
-            flex: 1,
-            overflow: 'hidden',
-            display: 'flex',
-            background: config.bookingHeaderBackground
-          }}
+          className={styles.headerDays}
+          style={{ background: config.bookingHeaderBackground }}
         >
           {Array.from({ length: visibleRange.endIndex - visibleRange.startIndex + 1 }, (_, i) => {
             const dayIndex = visibleRange.startIndex + i
@@ -49,14 +68,10 @@ export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGrid
             return (
               <div
                 key={dayIndex}
+                className={styles.headerDay}
                 style={{
                   width: COLUMN_WIDTH_PX,
                   minWidth: COLUMN_WIDTH_PX,
-                  padding: '8px 4px',
-                  fontSize: 11,
-                  textAlign: 'center',
-                  borderRight: '1px solid #eee',
-                  color: '#666',
                 }}
               >
                 {dayLabels[dayIndex]}
@@ -68,7 +83,7 @@ export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGrid
 
       {/* Scrollable grid body */}
       <div
-        style={{ flex: 1, overflowX: 'auto', overflowY: 'auto' }}
+        className={styles.body}
         onScroll={handleScroll}
       >
         <div style={{ minWidth: TOTAL_DAYS * COLUMN_WIDTH_PX + 140 }}>

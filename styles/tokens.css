@@ -1,0 +1,126 @@
+/**
+ * Design Tokens —— 全局视觉单一事实来源（Single Source of Truth）。
+ *
+ * 职责：以 CSS 自定义属性形式暴露 7 类语义化变量，组件只消费 token、不写死值。
+ * 分层：本文件为基座层（base layer），后续可通过覆盖 :root 或挂载主题类
+ *       （如 [data-theme="dark"]）实现多主题切换，而无需修改组件代码。
+ *
+ * 命名约定：--<类目>-<语义>-<修饰>，例如 --color-bg-row-hover、--size-row-height。
+ * 类目：color / font / spacing / size / radius / shadow / motion
+ */
+:root {
+  /* === Color：颜色 ============================================== */
+  /* 表面 */
+  --color-bg-base: #ffffff;
+  --color-bg-app: #f5f5f5;
+  --color-bg-elevated: #fafafa;
+  --color-bg-muted: #f8f8f8;
+  --color-bg-row-hover: #f0f7ff;
+  --color-bg-cell-hover: #e3f2fd;
+  --color-bg-overlay: rgba(0, 0, 0, 0.2);
+
+  /* 文本（按视觉权重排列：强 → 弱） */
+  --color-text-primary: #222222;
+  --color-text-secondary: #555555;
+  --color-text-tertiary: #666666;
+  --color-text-muted: #888888;
+  --color-text-disabled: #aaaaaa;
+  --color-text-placeholder: #bbbbbb;
+  --color-text-on-status: #ffffff;
+  --color-text-on-dark: #ffffff;
+  --color-text-on-dark-muted: rgba(255, 255, 255, 0.65);
+
+  /* 边框（按视觉权重三档） */
+  --color-border-subtle: #f0f0f0;
+  --color-border-default: #eeeeee;
+  --color-border-strong: #dddddd;
+  --color-border-divider: #e0e0e0;
+
+  /* 品牌 / 强调 */
+  --color-brand-primary: #6c63ff;
+  --color-brand-surface-dark: #1a1a2e;
+  --color-brand-surface-dark-hover: rgba(255, 255, 255, 0.1);
+
+  /* 业务状态色（Booking Status 语义调色板） */
+  --color-status-confirmed: #4caf50;
+  --color-status-pending: #ff9800;
+  --color-status-in-house: #2196f3;
+  --color-status-checked-out: #9e9e9e;
+  --color-status-cancelled: #f44336;
+  --color-status-fallback: #cccccc;
+
+  /* 状态 Pill（背景 + 文本配对） */
+  --color-pill-in-house-bg: #e3f2fd;
+  --color-pill-in-house-text: #1565c0;
+  --color-pill-confirmed-bg: #e8f5e9;
+  --color-pill-confirmed-text: #2e7d32;
+  --color-pill-default-bg: #f5f5f5;
+  --color-pill-default-text: #555555;
+
+  /* 反馈 / 通知 */
+  --color-feedback-danger: #ef5350;
+
+  /* === Typography：排版 ========================================= */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+  --font-size-2xs: 10px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 15px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 18px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --line-height-relaxed: 1.6;
+  --letter-spacing-wide: 0.5px;
+
+  /* === Spacing：间距（4 倍数体系） ============================== */
+  --spacing-1: 4px;
+  --spacing-2: 6px;
+  --spacing-3: 8px;
+  --spacing-4: 12px;
+  --spacing-5: 16px;
+  --spacing-6: 20px;
+  --spacing-7: 24px;
+
+  /* === Size：尺寸（业务语义命名） =============================== */
+  --size-row-height: 40px;
+  --size-row-label-width: 140px;
+  --size-bar-height: 28px;
+  --size-bar-offset-top: 6px;
+  --size-sidebar-width: 200px;
+  --size-drawer-width: 380px;
+  --size-ticket-list-width: 320px;
+  --size-message-max-width: 520px;
+  --size-detail-row-label-width: 70px;
+  --size-unread-dot: 8px;
+  --size-nav-active-bar: 3px;
+
+  /* === Radius：圆角 ============================================= */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 12px;
+  --radius-circle: 50%;
+
+  /* === Shadow：阴影 ============================================= */
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-drawer: -4px 0 20px rgba(0, 0, 0, 0.15);
+
+  /* === Motion：动效 ============================================= */
+  --motion-duration-fast: 120ms;
+  --motion-duration-base: 150ms;
+  --motion-duration-slow: 200ms;
+  --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* === Z-Index：层级 ============================================ */
+  --z-row-label: 1;
+  --z-bar: 2;
+  --z-overlay: 99;
+  --z-drawer: 100;
+}

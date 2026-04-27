@@ -1,0 +1,60 @@
+/**
+ * Sidebar 样式模块
+ *
+ * 职责：承载左侧导航栏（容器 / 品牌区 / 链接 / active 态 / 未读徽标）的所有
+ *       静态样式，仅消费 styles/tokens.css 暴露的 CSS 变量，不出现裸 hex
+ *       与魔法数字。
+ * 边界：active 态由组件根据 router.pathname 通过条件 className 切换；
+ *       未读徽标的展示与数值由组件按 unreadCount 决定。本文件只描述布局
+ *       结构、视觉规格与交互过渡，不包含运行时计算值。
+ */
+
+/* 导航容器：固定宽度的暗色侧栏，纵向堆叠子项。 */
+.nav {
+  width: var(--size-sidebar-width);
+  min-width: var(--size-sidebar-width);
+  background: var(--color-brand-surface-dark);
+  color: var(--color-text-on-dark);
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-7) 0;
+}
+
+/* 品牌区：侧栏顶部的产品名槽位。 */
+.brand {
+  padding: 0 var(--spacing-6) var(--spacing-7);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+/* 导航链接基类：左侧透明强调线占位，避免 active 切换时位移。 */
+.navLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-3) var(--spacing-6);
+  background: transparent;
+  color: var(--color-text-on-dark-muted);
+  font-size: var(--font-size-md);
+  border-left: var(--size-nav-active-bar) solid transparent;
+  transition: all var(--motion-duration-base) var(--motion-easing-standard);
+  text-decoration: none;
+}
+
+/* 导航链接 active 修饰：高亮背景 + 强调线 + 高对比文本。 */
+.navLinkActive {
+  background: var(--color-brand-surface-dark-hover);
+  color: var(--color-text-on-dark);
+  border-left-color: var(--color-brand-primary);
+}
+
+/* 未读徽标：右侧红色 pill，承载未读数。 */
+.unreadBadge {
+  background: var(--color-feedback-danger);
+  color: var(--color-text-on-dark);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--spacing-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}

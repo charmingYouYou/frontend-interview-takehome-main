@@ -1,0 +1,71 @@
+/**
+ * RoomRow 样式模块
+ *
+ * 职责：承载单个房型行（行标签 + 时间轴 + 单元格 + 预订条）的所有静态样式，
+ *       仅消费 styles/tokens.css 暴露的 CSS 变量，不出现裸 hex 与魔法数字。
+ * 边界：与几何位置（left / width）相关的运行时计算值由组件作为 inline style
+ *       传入；本文件只描述布局结构、视觉规格与交互过渡。
+ */
+
+/* 行容器：水平排列「行标签 + 时间轴」，整行 hover 通过 .rowHovered 叠加。 */
+.row {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-default);
+  background: var(--color-bg-base);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.rowHovered {
+  background: var(--color-bg-row-hover);
+}
+
+/* 行标签：固定宽度的房型名称槽位。 */
+.label {
+  width: var(--size-row-label-width);
+  min-width: var(--size-row-label-width);
+  padding: var(--spacing-3) var(--spacing-4);
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  border-right: 1px solid var(--color-border-default);
+  background: var(--color-bg-base);
+  z-index: 1;
+}
+
+/* 时间轴：定位上下文（position:relative），承载日格背景与预订条。 */
+.timeline {
+  position: relative;
+  height: var(--size-row-height);
+  flex: 1;
+}
+
+/* 日格背景：等宽栅格单元，hover 通过 .cellHovered 叠加。 */
+.cell {
+  position: absolute;
+  height: var(--size-row-height);
+  border-right: 1px solid var(--color-border-subtle);
+  cursor: default;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.cellHovered {
+  background: var(--color-bg-cell-hover);
+}
+
+/* 预订条：跨日色块，背景色由组件按状态注入。 */
+.bar {
+  position: absolute;
+  height: var(--size-bar-height);
+  top: var(--size-bar-offset-top);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding-left: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-on-status);
+  overflow: hidden;
+  white-space: nowrap;
+  z-index: 2;
+}

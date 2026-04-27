@@ -1,34 +1,34 @@
 import React, { useState } from 'react'
 import type { NextPage } from 'next'
 import useSWR from 'swr'
-import { Booking, RoomUnit } from '@/types'
+import { Booking } from '@/types'
 import { BookingGrid } from '@/components/BookingGrid/BookingGrid'
 import { BookingDrawer } from '@/components/BookingDrawer/BookingDrawer'
 import { ROOM_UNITS } from '@/lib/mockData'
+import styles from './index.module.css'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
+/**
+ * Bookings 首页：
+ * - 通过 SWR 拉取 /api/bookings 列表，叶子组件 BookingGrid 负责网格渲染
+ * - 选中预订时弹出 BookingDrawer + 半透明遮罩
+ * - 所有静态样式来自 index.module.css + tokens.css，TSX 层不再保留 inline style
+ */
 const BookingsPage: NextPage = () => {
   const { data: bookings, isLoading } = useSWR<Booking[]>('/api/bookings', fetcher)
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div className={styles.page}>
       {/* Page header */}
-      <div style={{
-        padding: '16px 24px',
-        borderBottom: '1px solid #e0e0e0',
-        background: 'white',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 16,
-      }}>
-        <h1 style={{ fontSize: 18, fontWeight: 600 }}>Booking Calendar</h1>
-        {isLoading && <span style={{ fontSize: 13, color: '#888' }}>Loading...</span>}
+      <div className={styles.header}>
+        <h1 className={styles.title}>Booking Calendar</h1>
+        {isLoading && <span className={styles.loadingHint}>Loading...</span>}
       </div>
 
       {/* Grid */}
-      <div style={{ flex: 1, overflow: 'hidden', padding: 16 }}>
+      <div className={styles.gridWrap}>
         {bookings ? (
           <BookingGrid
             roomUnits={ROOM_UNITS}
@@ -36,7 +36,7 @@ const BookingsPage: NextPage = () => {
             onBookingClick={setSelectedBooking}
           />
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888' }}>
+          <div className={styles.placeholder}>
             {isLoading ? 'Loading bookings...' : 'No bookings found.'}
           </div>
         )}
@@ -48,12 +48,7 @@ const BookingsPage: NextPage = () => {
           {/* Backdrop */}
           <div
             onClick={() => setSelectedBooking(null)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0,0,0,0.2)',
-              zIndex: 99,
-            }}
+            className={styles.backdrop}
           />
           <BookingDrawer
             booking={selectedBooking}

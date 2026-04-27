@@ -1,0 +1,63 @@
+/**
+ * Bookings 首页样式模块
+ *
+ * 职责：承载 /pages/index.tsx 的页面级布局（页头 + 网格容器 + 加载/空态文案
+ *       + Drawer 遮罩）。仅消费 tokens.css 暴露的 CSS 变量，不出现裸 hex
+ *       与魔法数字。
+ * 边界：BookingGrid / BookingDrawer 内部样式由各自模块负责，本文件只描述
+ *       页面骨架与遮罩层。
+ */
+
+/* 页面根容器：纵向布满 main 槽位，溢出由内部子区接管。 */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 页头：标题与加载状态横向对齐，下边框分隔内容区。 */
+.header {
+  padding: var(--spacing-5) var(--spacing-7);
+  border-bottom: 1px solid var(--color-border-divider);
+  background: var(--color-bg-base);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-5);
+}
+
+/* 页头标题：使用 2xl 字号 + semibold 权重作为页面级 H1。 */
+.title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* 顶部加载提示：弱化色 + base 字号，紧随标题展示。 */
+.loadingHint {
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+}
+
+/* 网格容器：占据剩余高度，内部 BookingGrid 自行处理滚动。 */
+.gridWrap {
+  flex: 1;
+  overflow: hidden;
+  padding: var(--spacing-5);
+}
+
+/* 占位/空态：居中弱化文案，展示加载或空数据提示。 */
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-muted);
+}
+
+/* Drawer 背景遮罩：覆盖整个视口，点击关闭由组件层处理。 */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg-overlay);
+  z-index: var(--z-overlay);
+}

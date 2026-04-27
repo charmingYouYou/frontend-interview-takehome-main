@@ -1,0 +1,162 @@
+/**
+ * Messages 页样式模块
+ *
+ * 职责：承载 /pages/messages/index.tsx 的两栏布局（左侧 ticket 列表 +
+ *       右侧消息视图），以及 ticket 列表项的常态/active 态、未读小圆点、
+ *       未读字重切换等条件样式。
+ * 边界：仅消费 tokens.css 暴露的 CSS 变量，不出现裸 hex 与魔法数字；
+ *       active / unread 等状态以独立 className 表达，不在 tsx 内写三元
+ *       inline style。
+ */
+
+/* 页面根容器：横向两栏，整体占满 main 槽位高度。 */
+.page {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 左侧 ticket 列表：固定宽度，独立纵向滚动，右边框分隔消息视图。 */
+.ticketList {
+  width: var(--size-ticket-list-width);
+  min-width: var(--size-ticket-list-width);
+  border-right: 1px solid var(--color-border-divider);
+  overflow-y: auto;
+  background: var(--color-bg-base);
+}
+
+/* 列表标题区：semibold + lg 字号作为列表级标题。 */
+.ticketListHeader {
+  padding: var(--spacing-5) var(--spacing-6);
+  border-bottom: 1px solid var(--color-border-default);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-lg);
+}
+
+/* 单个 ticket 项：常态——无 active、无未读。
+ * 备注：纵向 padding 14px 不在 spacing 阶梯（4/6/8/12/16…），
+ *       通过 spacing-3(8) + spacing-2(6) 合成保持视觉零差异，避免新增 token。
+ */
+.ticketItem {
+  padding: calc(var(--spacing-3) + var(--spacing-2)) var(--spacing-6);
+  border-bottom: 1px solid var(--color-border-subtle);
+  cursor: pointer;
+  background: var(--color-bg-base);
+  border-left: var(--size-nav-active-bar) solid transparent;
+}
+
+/* ticket 项 active 态：高亮背景 + 品牌色左侧强调线。 */
+.ticketItemActive {
+  background: var(--color-bg-row-hover);
+  border-left-color: var(--color-brand-primary);
+}
+
+/* ticket 头部：访客名 + 未读小圆点的横向分布行。 */
+.ticketHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--spacing-1);
+}
+
+/* 访客名：默认 regular 权重。 */
+.ticketGuest {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-regular);
+}
+
+/* 访客名（未读）：升至 semibold 强化未读提示。 */
+.ticketGuestUnread {
+  font-weight: var(--font-weight-semibold);
+}
+
+/* 未读小圆点：品牌色填充，圆形，靠右上角对齐。 */
+.unreadDot {
+  width: var(--size-unread-dot);
+  height: var(--size-unread-dot);
+  border-radius: var(--radius-circle);
+  background: var(--color-brand-primary);
+  flex-shrink: 0;
+  margin-top: var(--spacing-1);
+}
+
+/* 主题摘要：次级文本色，默认 regular 权重。
+ * 备注：margin-bottom 3px 不在 spacing 阶梯，用 spacing-1(4) - 1px 合成
+ *       保持视觉零差异，避免新增 token。
+ */
+.ticketSubject {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: calc(var(--spacing-1) - 1px);
+  font-weight: var(--font-weight-regular);
+}
+
+/* 主题摘要（未读）：升至 medium 权重，与 guest 名区分层级。 */
+.ticketSubjectUnread {
+  font-weight: var(--font-weight-medium);
+}
+
+/* 最近一条消息预览：弱化色 + 单行省略。 */
+.ticketPreview {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 房屋名：最弱化色 + 最小字号，置于卡片底部。 */
+.ticketHouse {
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-placeholder);
+  margin-top: var(--spacing-1);
+}
+
+/* 右侧消息视图：占据剩余宽度，纵向布局。 */
+.messageView {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 消息视图正文：内边距 + 独立纵向滚动。 */
+.messageContent {
+  padding: var(--spacing-7);
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* 当前 ticket 的标题。 */
+.messageTitle {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--spacing-1);
+}
+
+/* 当前 ticket 的元信息（访客 · 房屋）。 */
+.messageMeta {
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-7);
+}
+
+/* 消息气泡：弱表面 + 圆角 + 限宽 + 舒适行高。 */
+.messageBubble {
+  padding: var(--spacing-4) var(--spacing-5);
+  background: var(--color-bg-muted);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-relaxed);
+  max-width: var(--size-message-max-width);
+}
+
+/* 空态占位：居中提示用户选择消息。 */
+.emptyState {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-placeholder);
+  font-size: var(--font-size-md);
+}
