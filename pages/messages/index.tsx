@@ -2,19 +2,13 @@ import React, { useEffect } from 'react'
 import type { GetServerSideProps, NextPage } from 'next'
 import { useRouter } from 'next/router'
 import { useSWRConfig } from 'swr'
+import clsx from 'clsx'
 import { Ticket } from '@/types'
 import { useTickets, markTicketRead } from '@/lib/api'
 import styles from './index.module.css'
 
 interface MessagesPageProps {
   initialTicketId: string | null
-}
-
-/**
- * 拼接 className，过滤掉 falsy 值（与 RoomRow 中 cx 同义，用于 active/unread 等状态叠加）。
- */
-function cx(...names: Array<string | false | null | undefined>): string {
-  return names.filter(Boolean).join(' ')
 }
 
 /**
@@ -26,7 +20,8 @@ function cx(...names: Array<string | false | null | undefined>): string {
  * 状态归属（本次重构调整）：原 MessagesContext 中维护的 currentHouse /
  * activeTicketId / unreadCount 已就地下沉。activeTicketId 由 URL query
  * 派生（已是路由真理来源），unreadCount 由 Sidebar 通过同一 SWR key
- * 直接派生，currentHouse 同样从 query 读取。本页面因此不再需要订阅
+ * 直接派生；currentHouse 已被识别为 ticketId 的派生量（通过 tickets
+ * 查表即可还原），不再作为独立路由参数维护。本页面因此不再需要订阅
  * 任何全局 Context，去掉了"页面 setUnreadCount → context → Sidebar"
  * 这条易失同步链路。
  */
@@ -60,7 +55,10 @@ const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
   }, [currentTicketId, tickets, mutate])
 
   const handleTicketClick = (ticket: Ticket) => {
-    router.push(`/messages?ticketId=${ticket.id}&houseId=${ticket.houseId}`)
+    // 仅以 ticketId 定位会话；houseId 是 ticket 的派生属性（tickets.find(...).houseId
+    // 即可还原），放进 URL 会形成"两份真理来源"，刷新/分享路径下需额外约束
+    // 一致性。统一收敛到 ticketId 后，链接更短、语义更窄。
+    router.push(`/messages?ticketId=${ticket.id}`)
   }
 
   return (
@@ -77,17 +75,17 @@ const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
             <div
               key={ticket.id}
               onClick={() => handleTicketClick(ticket)}
-              className={cx(styles.ticketItem, isActive && styles.ticketItemActive)}
+              className={clsx(styles.ticketItem, isActive && styles.ticketItemActive)}
             >
               <div className={styles.ticketHeader}>
-                <span className={cx(styles.ticketGuest, ticket.unread && styles.ticketGuestUnread)}>
+                <span className={clsx(styles.ticketGuest, ticket.unread && styles.ticketGuestUnread)}>
                   {ticket.guestName}
                 </span>
                 {ticket.unread && (
                   <span className={styles.unreadDot} />
                 )}
               </div>
-              <div className={cx(styles.ticketSubject, ticket.unread && styles.ticketSubjectUnread)}>
+              <div className={clsx(styles.ticketSubject, ticket.unread && styles.ticketSubjectUnread)}>
                 {ticket.subject}
               </div>
               <div className={styles.ticketPreview}>

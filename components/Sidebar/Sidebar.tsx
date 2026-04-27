@@ -1,6 +1,7 @@
 import React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
+import clsx from 'clsx'
 import { useTickets } from '@/lib/api'
 import styles from './Sidebar.module.css'
 
@@ -24,13 +25,6 @@ const NAV_ITEMS = [
   { href: '/messages', label: 'Messages' },
 ]
 
-/**
- * 拼接 className，过滤 falsy 值（用于条件挂载 active 修饰类）。
- */
-function cx(...names: Array<string | false | null | undefined>): string {
-  return names.filter(Boolean).join(' ')
-}
-
 export function Sidebar() {
   const router = useRouter()
   const { data: tickets } = useTickets()
@@ -49,7 +43,7 @@ export function Sidebar() {
           <Link
             key={item.href}
             href={item.href}
-            className={cx(styles.navLink, isActive && styles.navLinkActive)}
+            className={clsx(styles.navLink, isActive && styles.navLinkActive)}
           >
             <span>{item.label}</span>
             {isMessages && unreadCount > 0 && (

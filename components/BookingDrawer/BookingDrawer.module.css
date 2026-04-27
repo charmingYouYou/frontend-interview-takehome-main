@@ -110,6 +110,21 @@
   color: var(--color-pill-confirmed-text);
 }
 
+.statusPillPending {
+  background: var(--color-pill-pending-bg);
+  color: var(--color-pill-pending-text);
+}
+
+.statusPillCheckedOut {
+  background: var(--color-pill-checked-out-bg);
+  color: var(--color-pill-checked-out-text);
+}
+
+.statusPillCancelled {
+  background: var(--color-pill-cancelled-bg);
+  color: var(--color-pill-cancelled-text);
+}
+
 .statusPillDefault {
   background: var(--color-pill-default-bg);
   color: var(--color-pill-default-text);

@@ -7,9 +7,9 @@
 5. SWR 请求层缺乏抽象，调用样板大量散落且各自为政：(1) 同一份 `(url) => fetch(url).then(r => r.json())` fetcher 在 `pages/index` / `pages/messages/index` / `Sidebar` / `BookingDrawer` 共复制 4 份，且全部缺失 `res.ok` 校验，4xx/5xx 响应会被当作正常 JSON 渲染；(2) API 路径以字符串字面量出现在多处（`'/api/tickets'` 在 Sidebar 与 messages 页各写一遍，`/api/tickets/:id/read` 在 messages 页内联拼接），改路径需要全仓搜索；(3) 写操作（`POST /api/tickets/:id/read`）以裸 `fetch` 形式与 SWR 体系并行存在，乐观更新模板（mutate + optimisticData + revalidate）只能耦合写在页面组件里，复用与单测都无从下手；(4) 没有错误类型定义，状态码差异无法在调用层做精细分支处理。整体表现为"SWR 用了，但请求层并没有真正建立"。
 6. 日期处理逻辑分散且缺少统一基准，存在跨日边界（off-by-one）隐患：(1) `new Date()` 在 `lib/bookingConfig`（`DATE_RANGE_START` / `DATE_RANGE_END`）、`lib/mockData.dateStr`、`BookingGrid.getDayLabels`、`RoomRow.useMemo` 共 8+ 处独立调用，模块求值期与组件渲染期分别取系统时间，若用户在 23:59 → 00:01 边界触发渲染，"今天"在不同文件取到不同值，导致日历窗口起点、mock 锚点、预订条偏移量出现 1 天漂移；(2) 跨日天数计算以 `(new Date(a) - new Date(b)) / (1000 * 60 * 60 * 24)` 手算样板形式重复 4 处，遇夏令时切换会得到非整数误差，且无法统一替换实现；(3) 日期格式化（`d.getMonth() + 1` / `toISOString().split('T')[0]`）散落各处，无单一事实来源，未来若需扩展时区 / 国际化 / 农历能力需要全文回改。整体表现为"日期处理"作为基础设施完全缺失，业务代码直接耦合 `Date` 原生 API。
 7. `BookingDrawer` 选中态仅以 `pages/index.tsx` 内部的 `useState<selectedBooking>` 维护，缺乏持久化与可分享性：(1) 刷新页面后选中态丢失，必须重新点击才能定位到原 Booking，对长会话操作（编辑、查阅详情）极不友好；(2) URL 不携带选中信息，链接无法分享给同事直达指定 Booking；(3) 浏览器前进/后退按钮不能在"打开/关闭 Drawer"两态间往返，与用户对路由式 UI 的常规预期相悖；(4) 与 `/messages` 通过 `ticketId` query 派生选中态的策略形成双标，整站交互范式不一致。
-8. `BookingDrawer`中`getStatusPillClass`缺少对`pengding`状态的处理, 需要补齐
-9. `STATUS_LABELS`和`BookingStatus`维护了多份, BookingStatus改为枚举, 统一维护引用
-10: /message 只需要ticketId即可定位, 无需houseId
+8. `BookingDrawer.getStatusPillClass` 状态分支不完整：当前实现仅对 `in_house` / `confirmed` 两态显式分支，`pending` / `checked_out` / `cancelled` 全部回落到 `statusPillDefault`，导致 BookingStatus 五态在 UI 层只表达了三态。根因在于该函数以 `if/else` 串行判断 + 入参 `status: string` 的弱类型签名形式实现，新增枚举成员时编译器无法静态强制覆盖；属于"枚举完备性"在边界处的失守。
+9. `BookingStatus` 与其展示元数据存在多份事实来源：(1) `BookingStatus` 以 string union 形式声明在 `types/index.ts`，运行时无可枚举句柄，下游只能写裸字面量 `'in_house'` / `'pending'`；(2) `STATUS_LABELS`（`BookingDrawer`）与 `STATUS_COLOR_VARS`（`RoomRow`）以同义字面量 key 在两个组件中独立维护；(3) 任何一方新增 / 删除状态都需要跨文件同步修改，且 `Record<…, T>` 漏写不会被 TS 静态发现 —— issue 8 即为此类典型。需将 `BookingStatus` 改造为枚举（运行时可枚举 + nominal 类型），并把状态域的展示元数据集中到单一模块维护。
+10. `/messages` 路由 query 同时维护 `ticketId` + `houseId` 两个参数，但 `houseId` 是 `ticket` 的派生属性（`tickets.find(t => t.id === ticketId).houseId` 即可还原），构成"双真理来源"：刷新 / 分享 / 浏览器前进后退路径下需额外约束 `houseId` 与 `ticketId` 互相一致，否则可能出现"ticket 与 house 不同源"的非法 URL 状态。语义上 `ticketId` 已具完整定位能力，`houseId` 应作为派生量从 ticket 数据查表得到，不应进入 URL。
 
 ## 应用的修复
 <!-- 对于每个修复：你改变了什么，为什么，以及你选择了什么方法 -->
@@ -61,6 +61,23 @@
    - **下游零侵入**：`BookingDrawer` 接口（`booking` / `onClose` props）保持不变，详情接口 `useBookingDetail(booking?.id)` 自然按新选中项重新发起 SWR 请求，缓存命中即时复用；`BookingGrid` 的 `onBookingClick` 契约不变，`pages/index.tsx` 内部把回调从 `setSelectedBooking` 替换为 `openBooking` 即可，调用层零感知。
    - **效果**：(a) 用户在 Drawer 打开状态刷新页面，选中态精确还原；(b) 链接 `?bookingId=xxx` 可直接分享，他人打开即定位到同一 Booking；(c) 浏览器前进/后退按钮可在 Drawer 开合两态间往返；(d) 与 `/messages` 形成统一的"URL 驱动 UI"心智模型。
    - **覆盖清单**：改动 `pages/index.tsx` 单文件（新增 `getServerSideProps`、改用 `useRouter` 派生选中态、移除本地 `useState`）。`tsc --noEmit` 校验通过，无新增类型错误。
+8. 按 **「枚举完备性由类型系统强制」** 原则重构 `getStatusPillClass`，把原 `if/else` 串行分支改造为 `Record<BookingStatus, string>` 查表：
+   - **签名收紧**：函数入参由 `status: string` 改为 `status: BookingStatus`，从根源杜绝外部传入未知字符串绕过分支检查的可能。
+   - **查表替换分支**：新增 `STATUS_PILL_CLASSES: Record<BookingStatus, string>`，TS 静态强制枚举所有成员都被覆盖；`getStatusPillClass` 退化为单行 `STATUS_PILL_CLASSES[status] ?? styles.statusPillDefault`。新增枚举成员时若忘记补齐映射，编译期即报错，issue 8 类问题不会再以同样方式复发。
+   - **CSS 与 token 同步补齐**：`tokens.css` 新增三对 pill 配色（`--color-pill-pending-bg/text` / `--color-pill-checked-out-bg/text` / `--color-pill-cancelled-bg/text`），`BookingDrawer.module.css` 新增 `.statusPillPending` / `.statusPillCheckedOut` / `.statusPillCancelled` 三个修饰类，与现有 `confirmed` / `in_house` 同构挂载，五态视觉表达对齐。
+   - **覆盖清单**：改动 `components/BookingDrawer/BookingDrawer.tsx` / `components/BookingDrawer/BookingDrawer.module.css` / `styles/tokens.css` 共 3 个文件；`tsc --noEmit` 通过。
+9. 按 **「状态域单一事实来源 + 运行时可枚举」** 原则收敛 `BookingStatus`：
+   - **类型形态升级**：`BookingStatus` 由 string union 改为 string `enum`（成员值与原字面量一致：`Confirmed='confirmed'` / `Pending='pending'` / `InHouse='in_house'` / `CheckedOut='checked_out'` / `Cancelled='cancelled'`），保持线缆兼容（mock / 服务端 payload 无需迁移）；同时获得 nominal 类型与运行时可枚举句柄两项能力，业务代码不再写裸字面量 `'in_house'`，改用 `BookingStatus.InHouse`。
+   - **展示元数据集中**：新增 `lib/bookingStatus.ts` 作为状态域单一模块，承载 `BookingStatus` 枚举 + `STATUS_LABELS`（label 文案）+ `STATUS_COLOR_VARS`（→ token 变量映射）+ `STATUS_FALLBACK_COLOR` + `STATUS_PILL_CLASS_NAMES`（→ CSS Module key 名）；所有派生表类型均为 `Record<BookingStatus, string>`，新增枚举成员时编译器强制补齐所有派生表，从结构上根除"枚举漏写不报错"的隐患（issue 8 同类问题在此处也获得拦截）。
+   - **CSS Module 解耦设计**：`STATUS_PILL_CLASS_NAMES` 只持有 key 名字符串（如 `'statusPillConfirmed'`），不直接持有 `styles.statusPillConfirmed` 解引用结果；调用方写 `styles[STATUS_PILL_CLASS_NAMES[status]] ?? styles.statusPillDefault` 完成最终绑定。这样状态域模块不与任何具体 CSS Module 文件耦合，未来多组件复用同一映射也无需改造。
+   - **下游接入**：`types/index.ts` 仅 re-export `BookingStatus` 保持调用路径不变；`lib/mockData.ts` 字面量统一替换为 `BookingStatus.X`；`components/BookingGrid/RoomRow.tsx` 删除自有 `STATUS_COLOR_VARS` / `STATUS_FALLBACK_COLOR` 副本，改 `import` 共享导出；`components/BookingDrawer/BookingDrawer.tsx` 删除自有 `STATUS_LABELS` 与 `STATUS_PILL_CLASSES` 副本，`getStatusPillClass` 退化为单行 `styles[STATUS_PILL_CLASS_NAMES[status]] ?? styles.statusPillDefault`。
+   - **效果**：状态新增 / 删除 / 改名只需在 `lib/bookingStatus.ts` 改一处，label / 网格色 / pill class 三表通过 `Record<BookingStatus, …>` 自动跟随；运行时 `Object.values(BookingStatus)` 可直接遍历五态（未来 filter / form select 等场景零样板）。
+   - **覆盖清单**：新增 `lib/bookingStatus.ts`；改动 `types/index.ts` / `lib/mockData.ts` / `components/BookingGrid/RoomRow.tsx` / `components/BookingDrawer/BookingDrawer.tsx` 共 4 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
+10. 按 **「URL 仅承载最小定位信息 + 派生量不入路由」** 原则把 `/messages` 路由 query 收敛到 `ticketId` 单参数：
+    - **冗余参数移除**：`handleTicketClick` 由 `router.push('/messages?ticketId=X&houseId=Y')` 改为 `router.push('/messages?ticketId=X')`。`houseId` 在数据层可通过 `tickets.find(t => t.id === ticketId).houseId` 直接派生，无需作为独立路由参数维护；现有页面渲染（`activeTicket.houseName`）原本就走的是 ticket 查表路径，并未消费 `query.houseId`，改造对 UI 行为零影响。
+    - **不变量收敛**：双参数路由下"`houseId` 必须等于 `tickets[ticketId].houseId`"是一条隐式不变量，任何外链 / 用户手改 URL 都可能违反；单参数路由下该不变量自动成立，无需运行时校验。
+    - **链接面进一步收窄**：URL 长度更短、语义更窄、外部分享时不会暴露内部 `house` 标识；未来即使数据模型把 `ticket.houseId` 重构为多对一关联，前端路由层也无需跟随调整。
+    - **覆盖清单**：改动 `pages/messages/index.tsx` 单文件（`handleTicketClick` 简化 + 顶部状态归属注释同步收口）；`tsc --noEmit` 校验通过。
 
 ## 权衡取舍
 

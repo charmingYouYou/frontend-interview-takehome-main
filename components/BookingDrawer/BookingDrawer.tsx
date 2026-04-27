@@ -1,5 +1,7 @@
 import React from 'react'
-import { Booking } from '@/types'
+import clsx from 'clsx'
+import { Booking, BookingStatus } from '@/types'
+import { STATUS_LABELS, STATUS_PILL_CLASS_NAMES } from '@/lib/bookingStatus'
 import { useBookingDetail } from '@/lib/api'
 import styles from './BookingDrawer.module.css'
 
@@ -8,32 +10,14 @@ interface BookingDrawerProps {
   onClose: () => void
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  confirmed: 'Confirmed',
-  pending: 'Pending',
-  in_house: 'In House',
-  checked_out: 'Checked Out',
-  cancelled: 'Cancelled',
-}
-
 /**
- * 拼接 className，过滤掉 falsy 值（与 RoomRow 中的同名 helper 保持一致风格）。
+ * 状态 → Pill 修饰类的解引用：通过 lib/bookingStatus 中维护的"状态 →
+ * CSS Module key 名"映射，再叠加本组件的 styles 对象解引用得到最终
+ * className。映射本身（含枚举完备性约束）位于状态域单一模块，组件只
+ * 负责把抽象 key 映射到本组件的 CSS Module 实例。
  */
-function cx(...names: Array<string | false | null | undefined>): string {
-  return names.filter(Boolean).join(' ')
-}
-
-/**
- * 将 booking.status 映射到对应的状态 Pill 修饰类。
- *
- * 仅承担「业务状态 → 视觉修饰类」的逻辑映射，颜色与字号本身均在
- * BookingDrawer.module.css 中通过 token 变量定义；新增状态时只需
- * 在此处补充一行映射，无需触碰组件 JSX。
- */
-function getStatusPillClass(status: string): string {
-  if (status === 'in_house') return styles.statusPillInHouse
-  if (status === 'confirmed') return styles.statusPillConfirmed
-  return styles.statusPillDefault
+function getStatusPillClass(status: BookingStatus): string {
+  return styles[STATUS_PILL_CLASS_NAMES[status]] ?? styles.statusPillDefault
 }
 
 /**
@@ -80,7 +64,7 @@ export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
 
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Status</h3>
-          <span className={cx(styles.statusPill, getStatusPillClass(booking.status))}>
+          <span className={clsx(styles.statusPill, getStatusPillClass(booking.status))}>
             {STATUS_LABELS[booking.status] ?? booking.status}
           </span>
         </section>

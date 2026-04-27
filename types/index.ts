@@ -5,7 +5,11 @@ export interface RoomUnit {
   roomTypeName: string
 }
 
-export type BookingStatus = 'confirmed' | 'pending' | 'in_house' | 'checked_out' | 'cancelled'
+import { BookingStatus } from '@/lib/bookingStatus'
+
+// BookingStatus 枚举与展示元数据已下沉至 lib/bookingStatus.ts；此处仅 re-export，
+// 保持下游 `import { BookingStatus } from '@/types'` 调用路径稳定。
+export { BookingStatus }
 
 export interface Booking {
   id: string

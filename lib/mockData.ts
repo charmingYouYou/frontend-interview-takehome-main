@@ -1,4 +1,4 @@
-import { Booking, BookingDetail, RoomUnit, Ticket } from '@/types'
+import { Booking, BookingDetail, BookingStatus, RoomUnit, Ticket } from '@/types'
 import { addDays, today } from '@/lib/date'
 
 export const ROOM_UNITS: RoomUnit[] = Array.from({ length: 30 }, (_, i) => ({
@@ -8,7 +8,12 @@ export const ROOM_UNITS: RoomUnit[] = Array.from({ length: 30 }, (_, i) => ({
   roomTypeName: i < 10 ? 'Deluxe' : i < 20 ? 'Standard' : 'Suite',
 }))
 
-const STATUSES = ['confirmed', 'pending', 'in_house', 'checked_out'] as const
+const STATUSES: readonly BookingStatus[] = [
+  BookingStatus.Confirmed,
+  BookingStatus.Pending,
+  BookingStatus.InHouse,
+  BookingStatus.CheckedOut,
+] as const
 
 /**
  * 把"距今 N 天"换算为 ISO 日期字符串。
@@ -21,16 +26,16 @@ function dateStr(daysFromNow: number): string {
 }
 
 export const BOOKINGS: Booking[] = [
-  { id: 'b1', roomUnit: { roomId: 'room-1', name: 'Room 1' }, guestName: 'Alice Chen', checkIn: dateStr(-2), checkOut: dateStr(3), status: 'in_house', totalAmount: 1200 },
-  { id: 'b2', roomUnit: { roomId: 'room-1', name: 'Room 1' }, guestName: 'Bob Kim', checkIn: dateStr(4), checkOut: dateStr(7), status: 'confirmed', totalAmount: 900 },
-  { id: 'b3', roomUnit: { roomId: 'room-2', name: 'Room 2' }, guestName: 'Carol Tang', checkIn: dateStr(0), checkOut: dateStr(1), status: 'in_house', totalAmount: 300, notes: 'Single night' },
-  { id: 'b4', roomUnit: { roomId: 'room-2', name: 'Room 2' }, guestName: 'David Wu', checkIn: dateStr(2), checkOut: dateStr(9), status: 'confirmed', totalAmount: 2100 },
-  { id: 'b5', roomUnit: { roomId: 'room-3', name: 'Room 3' }, guestName: 'Eva Lim', checkIn: dateStr(-5), checkOut: dateStr(-1), status: 'checked_out', totalAmount: 1600 },
-  { id: 'b6', roomUnit: { roomId: 'room-3', name: 'Room 3' }, guestName: 'Frank Ho', checkIn: dateStr(1), checkOut: dateStr(5), status: 'confirmed', totalAmount: 1400 },
-  { id: 'b7', roomUnit: { roomId: 'room-4', name: 'Room 4' }, guestName: 'Grace Ng', checkIn: dateStr(-1), checkOut: dateStr(6), status: 'in_house', totalAmount: 2450 },
-  { id: 'b8', roomUnit: { roomId: 'room-5', name: 'Room 5' }, guestName: 'Henry Tan', checkIn: dateStr(3), checkOut: dateStr(10), status: 'pending', totalAmount: 1750 },
-  { id: 'b9', roomUnit: { roomId: 'room-6', name: 'Room 6' }, guestName: 'Iris Zhou', checkIn: dateStr(0), checkOut: dateStr(14), status: 'confirmed', totalAmount: 4200, notes: 'VIP guest' },
-  { id: 'b10', roomUnit: { roomId: 'room-7', name: 'Room 7' }, guestName: 'Jack Lee', checkIn: dateStr(-3), checkOut: dateStr(0), status: 'checked_out', totalAmount: 900 },
+  { id: 'b1', roomUnit: { roomId: 'room-1', name: 'Room 1' }, guestName: 'Alice Chen', checkIn: dateStr(-2), checkOut: dateStr(3), status: BookingStatus.InHouse, totalAmount: 1200 },
+  { id: 'b2', roomUnit: { roomId: 'room-1', name: 'Room 1' }, guestName: 'Bob Kim', checkIn: dateStr(4), checkOut: dateStr(7), status: BookingStatus.Confirmed, totalAmount: 900 },
+  { id: 'b3', roomUnit: { roomId: 'room-2', name: 'Room 2' }, guestName: 'Carol Tang', checkIn: dateStr(0), checkOut: dateStr(1), status: BookingStatus.InHouse, totalAmount: 300, notes: 'Single night' },
+  { id: 'b4', roomUnit: { roomId: 'room-2', name: 'Room 2' }, guestName: 'David Wu', checkIn: dateStr(2), checkOut: dateStr(9), status: BookingStatus.Confirmed, totalAmount: 2100 },
+  { id: 'b5', roomUnit: { roomId: 'room-3', name: 'Room 3' }, guestName: 'Eva Lim', checkIn: dateStr(-5), checkOut: dateStr(-1), status: BookingStatus.CheckedOut, totalAmount: 1600 },
+  { id: 'b6', roomUnit: { roomId: 'room-3', name: 'Room 3' }, guestName: 'Frank Ho', checkIn: dateStr(1), checkOut: dateStr(5), status: BookingStatus.Confirmed, totalAmount: 1400 },
+  { id: 'b7', roomUnit: { roomId: 'room-4', name: 'Room 4' }, guestName: 'Grace Ng', checkIn: dateStr(-1), checkOut: dateStr(6), status: BookingStatus.InHouse, totalAmount: 2450 },
+  { id: 'b8', roomUnit: { roomId: 'room-5', name: 'Room 5' }, guestName: 'Henry Tan', checkIn: dateStr(3), checkOut: dateStr(10), status: BookingStatus.Pending, totalAmount: 1750 },
+  { id: 'b9', roomUnit: { roomId: 'room-6', name: 'Room 6' }, guestName: 'Iris Zhou', checkIn: dateStr(0), checkOut: dateStr(14), status: BookingStatus.Confirmed, totalAmount: 4200, notes: 'VIP guest' },
+  { id: 'b10', roomUnit: { roomId: 'room-7', name: 'Room 7' }, guestName: 'Jack Lee', checkIn: dateStr(-3), checkOut: dateStr(0), status: BookingStatus.CheckedOut, totalAmount: 900 },
   ...Array.from({ length: 40 }, (_, i) => ({
     id: `b${i + 11}`,
     roomUnit: { roomId: `room-${(i % 20) + 8}`, name: `Room ${(i % 20) + 8}` },
@@ -51,7 +56,7 @@ export const BOOKING_DETAILS: Record<string, BookingDetail> = Object.fromEntries
       guestPhone: `+65 9${Math.floor(1000000 + Math.random() * 9000000)}`,
       source: ['Airbnb', 'Booking.com', 'Direct', 'Expedia'][Math.floor(Math.random() * 4)],
       specialRequests: b.notes ?? '',
-      paymentStatus: b.status === 'pending' ? 'unpaid' : 'paid',
+      paymentStatus: b.status === BookingStatus.Pending ? 'unpaid' : 'paid',
       createdAt: dateStr(-10),
     },
   ])

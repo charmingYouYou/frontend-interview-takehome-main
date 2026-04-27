@@ -1,5 +1,7 @@
 import React, { useMemo } from "react";
-import { Booking, BookingStatus } from "@/types";
+import clsx from "clsx";
+import { Booking } from "@/types";
+import { STATUS_COLOR_VARS, STATUS_FALLBACK_COLOR } from "@/lib/bookingStatus";
 import { diffDays } from "@/lib/date";
 import styles from "./RoomRow.module.css";
 
@@ -25,30 +27,6 @@ interface RoomRowProps {
   /** 上报本行的 cell hover 变化；传 null 表示离开。 */
   onHoverCell: (cell: HoveredCell | null) => void;
   onBookingClick: (booking: Booking) => void;
-}
-
-/**
- * Booking 状态到 token 的映射。
- *
- * 取值统一指向 styles/tokens.css 中的 --color-status-* 变量，使颜色定义
- * 集中在 token 层；组件只持有「状态 → 变量名」的逻辑映射，避免在组件
- * 内重复维护 hex 字面量。
- */
-const STATUS_COLOR_VARS: Record<BookingStatus, string> = {
-  confirmed: "var(--color-status-confirmed)",
-  pending: "var(--color-status-pending)",
-  in_house: "var(--color-status-in-house)",
-  checked_out: "var(--color-status-checked-out)",
-  cancelled: "var(--color-status-cancelled)",
-};
-
-const STATUS_FALLBACK_COLOR = "var(--color-status-fallback)";
-
-/**
- * 拼接 className，过滤掉 falsy 值（用于条件挂载 hover 类）。
- */
-function cx(...names: Array<string | false | null | undefined>): string {
-  return names.filter(Boolean).join(" ");
 }
 
 /**
@@ -95,7 +73,7 @@ export function RoomRow({
   const isHovered = hoveredCell?.rowId === rowId;
 
   return (
-    <div className={cx(styles.row, isHovered && styles.rowHovered)}>
+    <div className={clsx(styles.row, isHovered && styles.rowHovered)}>
       <div className={styles.label}>{rowName}</div>
 
       <div className={styles.timeline}>
@@ -110,7 +88,7 @@ export function RoomRow({
             return (
               <div
                 key={dayIndex}
-                className={cx(styles.cell, isCellHovered && styles.cellHovered)}
+                className={clsx(styles.cell, isCellHovered && styles.cellHovered)}
                 style={{
                   left: (dayIndex - visibleStartIndex) * columnWidthPx,
                   width: columnWidthPx,
