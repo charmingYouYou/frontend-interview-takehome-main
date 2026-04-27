@@ -5,7 +5,7 @@
 3. `_app.tsx` 顶层 Provider 抽象越界，全局 Context 承载了本不该共享的状态：(1) `AppContext` 实际只暴露一份不可变默认配置 + 仅在 `BookingGrid` 子树内共享的 `hoveredCell`，被强行提升至 App 根，导致 `/messages` 等无关路由也进入订阅链路并被无谓重渲染；(2) `MessagesContext` 维护的 `currentHouse` / `activeTicketId` 与 URL query 完全同义，构成"路由 → context → 页面"的双真理来源，刷新与跳转两条路径下数据极易漂移；(3) `unreadCount` 是 `/api/tickets` 的派生量，却由 `/messages` 页面在 `useEffect` 里反向写入 Context 给 Sidebar 消费，形成"页面 setState → context → 侧栏"的脆弱同步链 —— SWR 同 key 自带跨组件缓存与一致性，根本无须再过一层 Context。
 4. Booking 网格的运行时常量在多处重复定义且语义错位：列宽 `COLUMN_WIDTH_PX = 48` 同时硬编码于 `BookingGrid` / `RoomRow` / `useVisibleRange` 三处，`TOTAL_DAYS = 30` 与 `VISIBLE_COLUMNS = 14` 也分散在 `BookingGrid` 与 hook 内部，主体 `minWidth` 计算里的 `+ 140` 更是无名魔法数字；与此同时承载这些值的类型 `AppConfig` 与单例 `APP_CONFIG` 命名为"应用级"，但所有字段（日历窗口、列宽、表头背景）实际都是 Booking 网格专属，抽象层级与命名严重错位 —— 既无法跨文件保持一致（任何一处改 48 都会引入视觉漂移），也阻碍未来 Messages 等其他域配置的并行扩展。
 5. SWR 请求层缺乏抽象，调用样板大量散落且各自为政：(1) 同一份 `(url) => fetch(url).then(r => r.json())` fetcher 在 `pages/index` / `pages/messages/index` / `Sidebar` / `BookingDrawer` 共复制 4 份，且全部缺失 `res.ok` 校验，4xx/5xx 响应会被当作正常 JSON 渲染；(2) API 路径以字符串字面量出现在多处（`'/api/tickets'` 在 Sidebar 与 messages 页各写一遍，`/api/tickets/:id/read` 在 messages 页内联拼接），改路径需要全仓搜索；(3) 写操作（`POST /api/tickets/:id/read`）以裸 `fetch` 形式与 SWR 体系并行存在，乐观更新模板（mutate + optimisticData + revalidate）只能耦合写在页面组件里，复用与单测都无从下手；(4) 没有错误类型定义，状态码差异无法在调用层做精细分支处理。整体表现为"SWR 用了，但请求层并没有真正建立"。
-6. new Date()取值问题, 统一取值, 单例, 防止出现多次初始化, 如23:59和00:01分别new Date(); 使用dayjs进行处理更加合适; 所有对日期的处理抽离成一个工具层, 统一维护统一调用, 不要分散
+6. 日期处理逻辑分散且缺少统一基准，存在跨日边界（off-by-one）隐患：(1) `new Date()` 在 `lib/bookingConfig`（`DATE_RANGE_START` / `DATE_RANGE_END`）、`lib/mockData.dateStr`、`BookingGrid.getDayLabels`、`RoomRow.useMemo` 共 8+ 处独立调用，模块求值期与组件渲染期分别取系统时间，若用户在 23:59 → 00:01 边界触发渲染，"今天"在不同文件取到不同值，导致日历窗口起点、mock 锚点、预订条偏移量出现 1 天漂移；(2) 跨日天数计算以 `(new Date(a) - new Date(b)) / (1000 * 60 * 60 * 24)` 手算样板形式重复 4 处，遇夏令时切换会得到非整数误差，且无法统一替换实现；(3) 日期格式化（`d.getMonth() + 1` / `toISOString().split('T')[0]`）散落各处，无单一事实来源，未来若需扩展时区 / 国际化 / 农历能力需要全文回改。整体表现为"日期处理"作为基础设施完全缺失，业务代码直接耦合 `Date` 原生 API。
 7. BookingDrawer缺少持久化能力, 可以通过url query做到持久化
 8. `BookingDrawer`中`getStatusPillClass`缺少对`pengding`状态的处理, 需要补齐
 9. `STATUS_LABELS`和`BookingStatus`维护了多份, 若依产生问题
@@ -44,6 +44,14 @@
    - **消费方改造**：`pages/index` / `pages/messages/index` / `Sidebar` / `BookingDrawer` 共 4 个文件移除各自的 `fetcher` / `useSWR` 直接调用，替换为对应领域 hook；`pages/messages/index` 内联的乐观更新逻辑删除（30+ 行），替换为单行 `markTicketRead(mutate, ticket.id)`。
    - **效果**：fetcher 与 SWR key 单一事实来源；HTTP 错误统一抛出可被 SWR `onError` / 全局 ErrorBoundary 捕获；新增端点只需在 `lib/api.ts` 加 endpoint + hook 两行，调用方零侵入；4xx/5xx 渲染隐患被根除。
    - **覆盖清单**：新增 `lib/api.ts`；改动 `pages/index.tsx` / `pages/messages/index.tsx` / `components/Sidebar/Sidebar.tsx` / `components/BookingDrawer/BookingDrawer.tsx` 共 4 个文件。`tsc --noEmit` 校验通过，仓库内除 `lib/api.ts` 外不再有 `fetch(` 或 `useSWR` 直接调用（仅 `pages/messages/index` 保留 `useSWRConfig` 以拿 mutate 引用，符合预期）。
+6. 按 **「日期处理基础设施单一事实来源 + 业务零裸 Date」** 原则建立统一日期工具层 `lib/date.ts`，把原本散落在 4 个文件、8+ 处的 `new Date()` 与时间戳手算彻底收敛：
+   - **底层选型**：引入 `dayjs`（不可变 API、< 3KB、与项目 ESM/SSR 链路兼容），相比直接封装原生 `Date`，dayjs 的 `add` / `diff` 在夏令时与时区切换边界结果稳定，且后续若需要时区 / 相对时间 / 农历能力可通过 plugin 平滑扩展，调用方零改动。
+   - **统一接口**：`lib/date.ts` 暴露 `IsoDate` 类型别名 + `today()` / `addDays(date, n)` / `diffDays(start, end)` / `formatMonthDay(date)` / `buildDayLabels(start, length)` 五个纯函数。所有公开函数以 `YYYY-MM-DD` ISO 字符串为主输入输出类型，避免 `Date` 实例在 props / SWR 缓存 / SSR 序列化链路中的心智负担，保持纯字符串单向数据流。
+   - **跨日边界一致性 ——「锚点一次读，向下派生」**：约定 `today()` 仅在模块求值期被调用一次，赋给模块级 const 锚点（`bookingConfig.DATE_RANGE_START` / `mockData.TODAY_ANCHOR`）后所有衍生值（`DATE_RANGE_END` / `dateStr(n)`）通过 `addDays` 从同一锚点派生，禁止在组件渲染、事件回调等运行时路径上反复调用。当前项目仅这两处取锚点，Node 模块缓存使二者实际在同一进程启动时刻先后毫秒内完成，工程上等价于单例；约定写在 `today()` 注释中，新增调用点遵循同一约束即可避免漂移。`BookingGrid` / `RoomRow` 的窗口计算改由父级透传 `DATE_RANGE_START`，组件本身不再持有"今天"的概念。
+   - **手算样板根除**：`RoomRow.useMemo` 内 4 处 `(new Date(a) - new Date(b)) / 86400000` 替换为单行 `diffDays(dateRangeStart, b.checkIn)`；同时把原"先两次 filter 内 new Date、再两次 map 内 new Date"的双倍计算合并为"先 map 一次、再 filter"的单次遍历，消除每条预订条 4 次冗余 `Date` 构造的性能浪费。
+   - **格式化下沉**：`BookingGrid.getDayLabels` 中的 `${d.getMonth()+1}/${d.getDate()}` 字符串拼接改为 `buildDayLabels` 调用，未来切语言 / 改格式（如 `MM-DD` / `D MMM`）只需改 `lib/date.ts` 一处，业务零侵入。
+   - **效果**：仓库内除 `lib/date.ts` 外**零** `new Date(` 运行时调用（`grep` 验证残留仅为注释中的反引号引用）；日期处理具备统一替换点、单一基准时间、可测试纯函数、可扩展插件机制四项基础设施特性。
+   - **覆盖清单**：新增 `lib/date.ts`；改动 `lib/bookingConfig.ts` / `lib/mockData.ts` / `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/RoomRow.tsx` 共 4 个文件；`package.json` 新增依赖 `dayjs`。`tsc --noEmit` 校验通过，无新增类型错误。
 
 ## 权衡取舍
 
@@ -56,3 +64,4 @@
 <!-- 你会进一步改进或调查什么？ -->
 1. 如果Booking Detail Drawer支持刷新仍然显示, 在复杂业务场景下需要考虑优先加载渲染Drawer, 而后再渲染日历路由
 2. 无极滚动日历/甘特在已有虚拟滚动后, 要看是否仍有性能问题, 若还是有问题, 可能要进一步考虑有canvas去做
+3. UI适配多设备, 如pc小屏是否收起Sidebar, 是否适配pad和mobile

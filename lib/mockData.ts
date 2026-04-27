@@ -1,4 +1,5 @@
 import { Booking, BookingDetail, RoomUnit, Ticket } from '@/types'
+import { addDays, today } from '@/lib/date'
 
 export const ROOM_UNITS: RoomUnit[] = Array.from({ length: 30 }, (_, i) => ({
   id: `room-${i + 1}`,
@@ -9,10 +10,14 @@ export const ROOM_UNITS: RoomUnit[] = Array.from({ length: 30 }, (_, i) => ({
 
 const STATUSES = ['confirmed', 'pending', 'in_house', 'checked_out'] as const
 
+/**
+ * 把"距今 N 天"换算为 ISO 日期字符串。
+ * 模块求值期通过 `lib/date.today()` 取得 TODAY_ANCHOR 后向下派生，
+ * 与 BOOKING_CONFIG 同样遵循"今天只读一次"的约定，避免跨日边界漂移。
+ */
+const TODAY_ANCHOR: string = today()
 function dateStr(daysFromNow: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + daysFromNow)
-  return d.toISOString().split('T')[0]
+  return addDays(TODAY_ANCHOR, daysFromNow)
 }
 
 export const BOOKINGS: Booking[] = [

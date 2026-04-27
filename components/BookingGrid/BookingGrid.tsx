@@ -3,27 +3,13 @@ import { Booking, RoomUnit } from '@/types'
 import { useVisibleRange } from '@/hooks/useVisibleRange'
 import { RoomRow, HoveredCell } from './RoomRow'
 import { BOOKING_CONFIG } from '@/lib/bookingConfig'
+import { buildDayLabels } from '@/lib/date'
 import styles from './BookingGrid.module.css'
 
 interface BookingGridProps {
   roomUnits: RoomUnit[]
   bookings: Booking[]
   onBookingClick: (booking: Booking) => void
-}
-
-/**
- * 根据起始日期生成 totalDays 个 "M/D" 形式的日期标签。
- *
- * 输入：ISO 格式起始日期字符串、需要生成的天数。
- * 输出：长度为 totalDays 的字符串数组，按日递增。
- * 副作用：无。
- */
-function getDayLabels(startDate: string, totalDays: number): string[] {
-  return Array.from({ length: totalDays }, (_, i) => {
-    const d = new Date(startDate)
-    d.setDate(d.getDate() + i)
-    return `${d.getMonth() + 1}/${d.getDate()}`
-  })
 }
 
 /**
@@ -55,7 +41,7 @@ export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGrid
     TOTAL_DAYS,
     DATE_RANGE_START,
   } = BOOKING_CONFIG
-  const dayLabels = getDayLabels(DATE_RANGE_START, TOTAL_DAYS)
+  const dayLabels = buildDayLabels(DATE_RANGE_START, TOTAL_DAYS)
 
   return (
     <div className={styles.root}>

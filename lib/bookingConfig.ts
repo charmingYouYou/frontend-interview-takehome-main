@@ -1,4 +1,5 @@
 import { BookingConfig } from '@/types'
+import { addDays, today } from '@/lib/date'
 
 /**
  * Booking 网格配置单例。
@@ -23,19 +24,18 @@ import { BookingConfig } from '@/types'
  *   收窄到 Booking 域可让职责一目了然，未来若有 Messages / 其他域
  *   配置可独立新增 *Config 文件而非耦合到此处。
  *
- * 注：DATE_RANGE_START / DATE_RANGE_END 仍以模块求值期 new Date() 计算；
- * 如需在 "23:59 → 00:01" 类跨日边界保持稳定，应迁移到统一日期工具层
- * （见 DECISIONS.md 第 5 条），本次重构保持原行为不动。
+ * 日期取值：模块求值期通过 `lib/date.today()` 一次性取得 DATE_RANGE_START
+ * 锚点，DATE_RANGE_END 基于同一锚点 `addDays` 派生，避免在同一模块内多
+ * 次读取系统时间产生 23:59 → 00:01 边界 off-by-one 的窗口漂移。
  */
+const TOTAL_DAYS = 30
+const DATE_RANGE_START: string = today()
+
 export const BOOKING_CONFIG: BookingConfig = {
-  DATE_RANGE_START: new Date().toISOString().split('T')[0],
-  DATE_RANGE_END: (() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 30)
-    return d.toISOString().split('T')[0]
-  })(),
+  DATE_RANGE_START,
+  DATE_RANGE_END: addDays(DATE_RANGE_START, TOTAL_DAYS),
   COLUMN_WIDTH_PX: 48,
   LABEL_COLUMN_WIDTH_PX: 140,
-  TOTAL_DAYS: 30,
+  TOTAL_DAYS,
   VISIBLE_COLUMNS: 14,
 }

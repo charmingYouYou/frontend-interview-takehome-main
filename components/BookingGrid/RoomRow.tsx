@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { Booking, BookingStatus } from "@/types";
+import { diffDays } from "@/lib/date";
 import styles from "./RoomRow.module.css";
 
 export interface HoveredCell {
@@ -79,33 +80,16 @@ export function RoomRow({
 
   const visibleBookings = useMemo(() => {
     return bookings
-      .filter((b) => {
-        const startDay = Math.floor(
-          (new Date(b.checkIn).getTime() -
-            new Date(dateRangeStart).getTime()) /
-            (1000 * 60 * 60 * 24),
-        );
-        const endDay = Math.floor(
-          (new Date(b.checkOut).getTime() -
-            new Date(dateRangeStart).getTime()) /
-            (1000 * 60 * 60 * 24),
-        );
-        return endDay >= visibleStartIndex && startDay <= visibleEndIndex;
-      })
       .map((b) => {
-        const startDay = Math.floor(
-          (new Date(b.checkIn).getTime() -
-            new Date(dateRangeStart).getTime()) /
-            (1000 * 60 * 60 * 24),
-        );
-        const endDay = Math.floor(
-          (new Date(b.checkOut).getTime() -
-            new Date(dateRangeStart).getTime()) /
-            (1000 * 60 * 60 * 24),
-        );
+        const startDay = diffDays(dateRangeStart, b.checkIn);
+        const endDay = diffDays(dateRangeStart, b.checkOut);
         const color = STATUS_COLOR_VARS[b.status] ?? STATUS_FALLBACK_COLOR;
         return { booking: b, startDay, endDay, color };
-      });
+      })
+      .filter(
+        ({ startDay, endDay }) =>
+          endDay >= visibleStartIndex && startDay <= visibleEndIndex,
+      );
   }, [bookings, visibleStartIndex, visibleEndIndex, dateRangeStart]);
 
   const isHovered = hoveredCell?.rowId === rowId;
