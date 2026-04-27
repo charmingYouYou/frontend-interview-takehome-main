@@ -4,7 +4,7 @@
 2. 视觉规格强耦合在 JSX inline `style` 中，缺乏单一事实来源：`RoomRow` / `BookingGrid` 等核心组件将颜色、间距、尺寸、圆角等视觉属性以字面量形式散落在 20+ 处 inline style 中（如 `#eee` / `#f0f0f0` / `#ddd` 三套近似分隔线、重复出现的 `48 / 140 / 40` 魔法数字）。带来的工程问题：(1) 同一语义的视觉值无统一约束，长期演进必然漂移；(2) hover / selected 等交互状态以三元运算耦合在 JSX 中，难以静态审查、复用与测试；(3) 无主题切换扩展点（dark mode / 多品牌主题），未来接入需要全文回改组件；(4) 每次渲染重新构造同一份 inline style 对象，无法被浏览器样式表缓存与共享。
 3. `_app.tsx` 顶层 Provider 抽象越界，全局 Context 承载了本不该共享的状态：(1) `AppContext` 实际只暴露一份不可变默认配置 + 仅在 `BookingGrid` 子树内共享的 `hoveredCell`，被强行提升至 App 根，导致 `/messages` 等无关路由也进入订阅链路并被无谓重渲染；(2) `MessagesContext` 维护的 `currentHouse` / `activeTicketId` 与 URL query 完全同义，构成"路由 → context → 页面"的双真理来源，刷新与跳转两条路径下数据极易漂移；(3) `unreadCount` 是 `/api/tickets` 的派生量，却由 `/messages` 页面在 `useEffect` 里反向写入 Context 给 Sidebar 消费，形成"页面 setState → context → 侧栏"的脆弱同步链 —— SWR 同 key 自带跨组件缓存与一致性，根本无须再过一层 Context。
 4. Booking 网格的运行时常量在多处重复定义且语义错位：列宽 `COLUMN_WIDTH_PX = 48` 同时硬编码于 `BookingGrid` / `RoomRow` / `useVisibleRange` 三处，`TOTAL_DAYS = 30` 与 `VISIBLE_COLUMNS = 14` 也分散在 `BookingGrid` 与 hook 内部，主体 `minWidth` 计算里的 `+ 140` 更是无名魔法数字；与此同时承载这些值的类型 `AppConfig` 与单例 `APP_CONFIG` 命名为"应用级"，但所有字段（日历窗口、列宽、表头背景）实际都是 Booking 网格专属，抽象层级与命名严重错位 —— 既无法跨文件保持一致（任何一处改 48 都会引入视觉漂移），也阻碍未来 Messages 等其他域配置的并行扩展。
-5. swr请求分散, 应统一抽象一个请求层, 统一维护管理
+5. SWR 请求层缺乏抽象，调用样板大量散落且各自为政：(1) 同一份 `(url) => fetch(url).then(r => r.json())` fetcher 在 `pages/index` / `pages/messages/index` / `Sidebar` / `BookingDrawer` 共复制 4 份，且全部缺失 `res.ok` 校验，4xx/5xx 响应会被当作正常 JSON 渲染；(2) API 路径以字符串字面量出现在多处（`'/api/tickets'` 在 Sidebar 与 messages 页各写一遍，`/api/tickets/:id/read` 在 messages 页内联拼接），改路径需要全仓搜索；(3) 写操作（`POST /api/tickets/:id/read`）以裸 `fetch` 形式与 SWR 体系并行存在，乐观更新模板（mutate + optimisticData + revalidate）只能耦合写在页面组件里，复用与单测都无从下手；(4) 没有错误类型定义，状态码差异无法在调用层做精细分支处理。整体表现为"SWR 用了，但请求层并没有真正建立"。
 6. new Date()取值问题, 统一取值, 单例, 防止出现多次初始化, 如23:59和00:01分别new Date(); 使用dayjs进行处理更加合适; 所有对日期的处理抽离成一个工具层, 统一维护统一调用, 不要分散
 7. BookingDrawer缺少持久化能力, 可以通过url query做到持久化
 8. `BookingDrawer`中`getStatusPillClass`缺少对`pengding`状态的处理, 需要补齐
@@ -36,11 +36,20 @@
    - **消费方改造**：`BookingGrid` 通过结构化解包从 `BOOKING_CONFIG` 取所需字段并就地使用，删除文件级 `COLUMN_WIDTH_PX` / `TOTAL_DAYS` 局部常量；`useVisibleRange` 同样直接 `import` 消费，去掉 hook 内部的 `COLUMN_WIDTH_PX` / `VISIBLE_COLUMNS` 复制品；`RoomRow` 保留显式 props 接口（`columnWidthPx` / `dateRangeStart` / `totalDays`，驼峰）由 `BookingGrid` 透传，保持单向数据流与可注入接口，便于复用与单测 —— 即使 `totalDays` 当前未被组件直接消费也保留为契约字段，避免未来扩展时反复增删 props。
    - **效果**：单一事实来源 —— 改 48 / 30 / 14 / 140 中任何一项只需在 `BOOKING_CONFIG` 改一处即可，跨文件视觉漂移风险归零；同时类型与命名抽象层级对齐 Booking 域，与 _app.tsx 注释 / `lib/bookingConfig` 头注释 / DECISIONS 第 5 条引用全部同步更新。
    - **覆盖清单**：`git mv lib/appConfig.ts → lib/bookingConfig.ts` 并改写常量；改动 `types/index.ts` / `BookingGrid` / `RoomRow` / `hooks/useVisibleRange` / `pages/_app` 共 5 个文件。`tsc --noEmit` 校验通过，无新增类型错误。
+5. 按 **「单一请求入口 + 领域 hook + 抛错型 fetcher」** 原则建立统一请求层 `lib/api.ts`，把原本散落在 4 个文件中的 SWR / fetch 样板全部收敛：
+   - **端点常量化**：新增 `API_ENDPOINTS` 对象集中所有 API 路径（`bookings` / `bookingDetail(id)` / `tickets` / `ticketRead(id)`），静态路径用常量、含参路径用函数生成；调用方禁止再写裸 URL 字面量，改路径只需在此处改一处。
+   - **抛错型 fetcher**：内部封装 `httpGet<T>` / `httpPost<T>`，强制 `res.ok` 校验，非 2xx 抛出携带 `status` 的 `HttpError`（同样 export 供上层精细分支判断）。从根本上修复原各处复制 fetcher 把 4xx/5xx 当 JSON 渲染的隐患。
+   - **领域 hook 收敛**：暴露 `useBookings()` / `useBookingDetail(id)` / `useTickets()` 三个领域 hook，调用方零样板（无需自带 fetcher、无需写 SWR key、无需手动处理 conditional key —— `useBookingDetail` 已在内部实现 id 为空时不发请求）；所有 hook 透传 `SWRConfiguration` 便于个别调用方覆盖刷新策略。
+   - **写操作模板化**：导出 `markTicketRead(mutate, ticketId)`，把"乐观更新 + 远端写入 + revalidate 兜底 + rollbackOnError"四步走模板封装在请求层；调用方仅需 `useSWRConfig().mutate` 注入即可，业务页面不再持有 SWR mutator 细节。
+   - **消费方改造**：`pages/index` / `pages/messages/index` / `Sidebar` / `BookingDrawer` 共 4 个文件移除各自的 `fetcher` / `useSWR` 直接调用，替换为对应领域 hook；`pages/messages/index` 内联的乐观更新逻辑删除（30+ 行），替换为单行 `markTicketRead(mutate, ticket.id)`。
+   - **效果**：fetcher 与 SWR key 单一事实来源；HTTP 错误统一抛出可被 SWR `onError` / 全局 ErrorBoundary 捕获；新增端点只需在 `lib/api.ts` 加 endpoint + hook 两行，调用方零侵入；4xx/5xx 渲染隐患被根除。
+   - **覆盖清单**：新增 `lib/api.ts`；改动 `pages/index.tsx` / `pages/messages/index.tsx` / `components/Sidebar/Sidebar.tsx` / `components/BookingDrawer/BookingDrawer.tsx` 共 4 个文件。`tsc --noEmit` 校验通过，仓库内除 `lib/api.ts` 外不再有 `fetch(` 或 `useSWR` 直接调用（仅 `pages/messages/index` 保留 `useSWRConfig` 以拿 mutate 引用，符合预期）。
 
 ## 权衡取舍
 
 <!-- 你有意识地没有做什么，为什么？ -->
-1. 手机号, 邮箱号, 金额是否做模糊处理 or 是否可见? 需要产品明确
+1. 手机号, 邮箱号, 金额是否做模糊处理 or 是否可见? 需要产品明确;
+2. 进入/messages 是否选中第一条未读消息? 需要产品明确;
 
 ## 如果有更多时间
 

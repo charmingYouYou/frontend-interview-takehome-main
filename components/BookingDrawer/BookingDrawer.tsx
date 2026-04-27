@@ -1,14 +1,12 @@
 import React from 'react'
-import useSWR from 'swr'
-import { Booking, BookingDetail } from '@/types'
+import { Booking } from '@/types'
+import { useBookingDetail } from '@/lib/api'
 import styles from './BookingDrawer.module.css'
 
 interface BookingDrawerProps {
   booking: Booking | null
   onClose: () => void
 }
-
-const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 const STATUS_LABELS: Record<string, string> = {
   confirmed: 'Confirmed',
@@ -48,10 +46,7 @@ function getStatusPillClass(status: string): string {
  * 拉取（loading / 缺失态分别有占位）。
  */
 export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
-  const { data: detail, isLoading } = useSWR<BookingDetail>(
-    booking ? `/api/bookings/${booking.id}` : null,
-    fetcher
-  )
+  const { data: detail, isLoading } = useBookingDetail(booking?.id)
 
   if (!booking) return null
 

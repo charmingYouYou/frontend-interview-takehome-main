@@ -1,17 +1,14 @@
 import React from 'react'
 import type { GetServerSideProps, NextPage } from 'next'
 import { useRouter } from 'next/router'
-import useSWR, { useSWRConfig } from 'swr'
+import { useSWRConfig } from 'swr'
 import { Ticket } from '@/types'
+import { useTickets, markTicketRead } from '@/lib/api'
 import styles from './index.module.css'
-
-const TICKETS_KEY = '/api/tickets'
 
 interface MessagesPageProps {
   initialTicketId: string | null
 }
-
-const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 /**
  * 拼接 className，过滤掉 falsy 值（与 RoomRow 中 cx 同义，用于 active/unread 等状态叠加）。
@@ -36,39 +33,14 @@ function cx(...names: Array<string | false | null | undefined>): string {
 const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
   const router = useRouter()
   const { mutate } = useSWRConfig()
-  const { data: tickets } = useSWR<Ticket[]>(TICKETS_KEY, fetcher)
+  const { data: tickets } = useTickets()
 
   // Use ticketId from URL query, fallback to SSR initial prop
   const currentTicketId = (router.query.ticketId as string) ?? initialTicketId
 
-  /**
-   * 命中未读 ticket 时同步把 unread 置为已读：
-   * - 乐观更新：先在 SWR 缓存里把对应 ticket.unread 改为 false，使列表
-   *   红点与 Sidebar 徽标即时收敛，无需等待网络回环；revalidate=false
-   *   避免在请求飞行期间被新一轮 GET 覆盖回未读态；
-   * - 远端写入：POST /api/tickets/:id/read 持久化已读事实；
-   * - 真值兜底：写入完成后再触发一次 revalidate，用服务端权威数据
-   *   修正乐观值；任一步失败则回滚到先前缓存（rollbackOnError）。
-   */
-  const markTicketRead = (ticketId: string) => {
-    mutate<Ticket[]>(
-      TICKETS_KEY,
-      async (current) => {
-        await fetch(`/api/tickets/${ticketId}/read`, { method: 'POST' })
-        return current?.map(t => t.id === ticketId ? { ...t, unread: false } : t)
-      },
-      {
-        optimisticData: (current) =>
-          current?.map(t => t.id === ticketId ? { ...t, unread: false } : t) ?? [],
-        rollbackOnError: true,
-        populateCache: true,
-        revalidate: true,
-      },
-    )
-  }
-
   const handleTicketClick = (ticket: Ticket) => {
-    if (ticket.unread) markTicketRead(ticket.id)
+    // 命中未读 ticket 时由统一请求层完成乐观更新 + 远端写入 + revalidate
+    if (ticket.unread) markTicketRead(mutate, ticket.id)
     router.push(`/messages?ticketId=${ticket.id}&houseId=${ticket.houseId}`)
   }
 

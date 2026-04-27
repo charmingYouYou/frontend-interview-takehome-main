@@ -1,13 +1,11 @@
 import React, { useState } from 'react'
 import type { NextPage } from 'next'
-import useSWR from 'swr'
 import { Booking } from '@/types'
 import { BookingGrid } from '@/components/BookingGrid/BookingGrid'
 import { BookingDrawer } from '@/components/BookingDrawer/BookingDrawer'
 import { ROOM_UNITS } from '@/lib/mockData'
+import { useBookings } from '@/lib/api'
 import styles from './index.module.css'
-
-const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 /**
  * Bookings 首页：
@@ -16,7 +14,7 @@ const fetcher = (url: string) => fetch(url).then(r => r.json())
  * - 所有静态样式来自 index.module.css + tokens.css，TSX 层不再保留 inline style
  */
 const BookingsPage: NextPage = () => {
-  const { data: bookings, isLoading } = useSWR<Booking[]>('/api/bookings', fetcher)
+  const { data: bookings, isLoading } = useBookings()
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
 
   return (

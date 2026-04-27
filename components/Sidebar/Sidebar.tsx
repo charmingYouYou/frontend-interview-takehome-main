@@ -1,8 +1,7 @@
 import React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
-import useSWR from 'swr'
-import { Ticket } from '@/types'
+import { useTickets } from '@/lib/api'
 import styles from './Sidebar.module.css'
 
 /**
@@ -25,8 +24,6 @@ const NAV_ITEMS = [
   { href: '/messages', label: 'Messages' },
 ]
 
-const fetcher = (url: string) => fetch(url).then(r => r.json())
-
 /**
  * 拼接 className，过滤 falsy 值（用于条件挂载 active 修饰类）。
  */
@@ -36,7 +33,7 @@ function cx(...names: Array<string | false | null | undefined>): string {
 
 export function Sidebar() {
   const router = useRouter()
-  const { data: tickets } = useSWR<Ticket[]>('/api/tickets', fetcher)
+  const { data: tickets } = useTickets()
   const unreadCount = tickets?.filter(t => t.unread).length ?? 0
 
   return (
