@@ -18,6 +18,7 @@
   --color-bg-row-hover: #f0f7ff;
   --color-bg-cell-hover: #e3f2fd;
   --color-bg-overlay: rgba(0, 0, 0, 0.2);
+  --color-bg-booking-header: #e8f4fc;
 
   /* 文本（按视觉权重排列：强 → 弱） */
   --color-text-primary: #222222;

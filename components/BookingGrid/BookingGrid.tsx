@@ -2,11 +2,8 @@ import React, { useState } from 'react'
 import { Booking, RoomUnit } from '@/types'
 import { useVisibleRange } from '@/hooks/useVisibleRange'
 import { RoomRow, HoveredCell } from './RoomRow'
-import { APP_CONFIG } from '@/lib/appConfig'
+import { BOOKING_CONFIG } from '@/lib/bookingConfig'
 import styles from './BookingGrid.module.css'
-
-const COLUMN_WIDTH_PX = 48
-const TOTAL_DAYS = 30
 
 interface BookingGridProps {
   roomUnits: RoomUnit[]
@@ -37,34 +34,37 @@ function getDayLabels(startDate: string, totalDays: number): string[] {
  * 状态归属：cell hover 状态（hoveredCell）仅在 Grid 内部跨 RoomRow 共享，
  *          以本地 useState 维护并通过 props 透传，避免提升至全局 Context
  *          污染无关页面的渲染链路。
- * 视觉规格：所有静态样式（颜色 / 间距 / 边框 / 字号）来自
- *         BookingGrid.module.css + tokens.css；仅以下两类值仍以 inline style
- *         注入：
- *           - 依赖 JS 常量的几何值：列宽 COLUMN_WIDTH_PX、主体最小宽度
- *             TOTAL_DAYS * COLUMN_WIDTH_PX + 140；
- *           - 来自 APP_CONFIG 的动态背景色 bookingHeaderBackground。
+ * 配置来源：列宽 / 标签列宽 / 总天数 / 表头背景 / 日期窗口起点全部从
+ *          BOOKING_CONFIG 读取（字段使用常量命名规范 UPPER_SNAKE_CASE），
+ *          本组件不再保留任何魔法数字；同名字段以驼峰 props 显式透传给
+ *          RoomRow，保持子组件接口稳定，便于复用与单测。
+ * 视觉规格：所有静态样式（颜色 / 间距 / 边框 / 字号 / 表头背景）来自
+ *         BookingGrid.module.css + tokens.css；仅依赖 JS 常量的几何值
+ *         （列宽 COLUMN_WIDTH_PX、主体最小宽度
+ *         TOTAL_DAYS * COLUMN_WIDTH_PX + LABEL_COLUMN_WIDTH_PX）仍以
+ *         inline style 注入。原 BOOKING_HEADER_BACKGROUND 已迁移至 token
+ *         层 --color-bg-booking-header，组件层不再持有此色值。
  */
 export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGridProps) {
   const { visibleRange, handleScroll } = useVisibleRange()
   const [hoveredCell, setHoveredCell] = useState<HoveredCell | null>(null)
 
-  const startDate = new Date().toISOString().split('T')[0]
-  const dayLabels = getDayLabels(startDate, TOTAL_DAYS)
+  const {
+    COLUMN_WIDTH_PX,
+    LABEL_COLUMN_WIDTH_PX,
+    TOTAL_DAYS,
+    DATE_RANGE_START,
+  } = BOOKING_CONFIG
+  const dayLabels = getDayLabels(DATE_RANGE_START, TOTAL_DAYS)
 
   return (
     <div className={styles.root}>
       {/* Header row */}
       <div className={styles.header}>
-        <div
-          className={styles.headerLabel}
-          style={{ background: APP_CONFIG.bookingHeaderBackground }}
-        >
+        <div className={styles.headerLabel}>
           Room
         </div>
-        <div
-          className={styles.headerDays}
-          style={{ background: APP_CONFIG.bookingHeaderBackground }}
-        >
+        <div className={styles.headerDays}>
           {Array.from({ length: visibleRange.endIndex - visibleRange.startIndex + 1 }, (_, i) => {
             const dayIndex = visibleRange.startIndex + i
             if (dayIndex >= TOTAL_DAYS) return null
@@ -89,7 +89,7 @@ export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGrid
         className={styles.body}
         onScroll={handleScroll}
       >
-        <div style={{ minWidth: TOTAL_DAYS * COLUMN_WIDTH_PX + 140 }}>
+        <div style={{ minWidth: TOTAL_DAYS * COLUMN_WIDTH_PX + LABEL_COLUMN_WIDTH_PX }}>
           {roomUnits.map(room => {
             const roomBookings = bookings.filter(
               b => b.roomUnit.roomId === room.id
@@ -103,7 +103,8 @@ export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGrid
                 visibleStartIndex={visibleRange.startIndex}
                 visibleEndIndex={visibleRange.endIndex}
                 totalDays={TOTAL_DAYS}
-                dateRangeStart={APP_CONFIG.dateRangeStart}
+                columnWidthPx={COLUMN_WIDTH_PX}
+                dateRangeStart={DATE_RANGE_START}
                 hoveredCell={hoveredCell}
                 onHoverCell={setHoveredCell}
                 onBookingClick={onBookingClick}

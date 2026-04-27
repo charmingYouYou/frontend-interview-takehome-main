@@ -2,8 +2,6 @@ import React, { useMemo } from "react";
 import { Booking, BookingStatus } from "@/types";
 import styles from "./RoomRow.module.css";
 
-const COLUMN_WIDTH_PX = 48;
-
 export interface HoveredCell {
   rowId: string;
   dayIndex: number;
@@ -15,6 +13,10 @@ interface RoomRowProps {
   bookings: Booking[];
   visibleStartIndex: number;
   visibleEndIndex: number;
+  /** 日历窗口总天数；当前组件未直接消费，作为父级显式契约保留以便未来扩展。 */
+  totalDays: number;
+  /** 单日列宽（px），由父级 BookingGrid 从 BOOKING_CONFIG 透传，避免子组件直读单例。 */
+  columnWidthPx: number;
   /** 时间窗起点（ISO 日期），由父级 BookingGrid 注入，避免组件直读全局 config。 */
   dateRangeStart: string;
   /** 当前悬停格（Grid 范围内单一事实），由父级集中维护并透传。 */
@@ -51,8 +53,11 @@ function cx(...names: Array<string | false | null | undefined>): string {
 /**
  * RoomRow：渲染单个房型在可视时间窗内的预订情况。
  *
- * 状态归属：本组件不再订阅 AppContext，hoveredCell 与 dateRangeStart 均由
- *          BookingGrid 通过 props 透传，单向数据流，便于复用与单测。
+ * 配置来源：列宽 columnWidthPx 与日历窗口起点 dateRangeStart 由父级
+ *          BookingGrid 通过 props 显式透传（数据来源仍为 BOOKING_CONFIG），
+ *          保持单向数据流与可注入接口；hoveredCell 同样由父级集中维护。
+ *          totalDays 当前组件不直接消费，但仍声明为 props 字段以稳定契约
+ *          供未来扩展使用。
  * 视觉规格：所有静态样式（颜色 / 间距 / 尺寸 / 圆角 / 动效）来自
  *          RoomRow.module.css + tokens.css；仅 left/width 等几何计算结果
  *          以 inline style 注入。
@@ -64,13 +69,13 @@ export function RoomRow({
   visibleStartIndex,
   visibleEndIndex,
   totalDays,
+  columnWidthPx,
   dateRangeStart,
   hoveredCell,
   onHoverCell,
   onBookingClick,
 }: RoomRowProps) {
   console.log("render", rowId);
-
 
   const visibleBookings = useMemo(() => {
     return bookings
@@ -123,8 +128,8 @@ export function RoomRow({
                 key={dayIndex}
                 className={cx(styles.cell, isCellHovered && styles.cellHovered)}
                 style={{
-                  left: (dayIndex - visibleStartIndex) * COLUMN_WIDTH_PX,
-                  width: COLUMN_WIDTH_PX,
+                  left: (dayIndex - visibleStartIndex) * columnWidthPx,
+                  width: columnWidthPx,
                 }}
                 onMouseEnter={() => onHoverCell({ rowId, dayIndex })}
                 onMouseLeave={() => onHoverCell(null)}
@@ -137,13 +142,13 @@ export function RoomRow({
         {visibleBookings.map(({ booking, startDay, endDay, color }) => {
           const left = Math.max(
             0,
-            (startDay - visibleStartIndex) * COLUMN_WIDTH_PX,
+            (startDay - visibleStartIndex) * columnWidthPx,
           );
           const width =
             (Math.min(endDay, visibleEndIndex) -
               Math.max(startDay, visibleStartIndex) +
               1) *
-            COLUMN_WIDTH_PX;
+            columnWidthPx;
           return (
             <div
               key={booking.id}
