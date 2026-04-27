@@ -6,7 +6,7 @@
 4. Booking 网格的运行时常量在多处重复定义且语义错位：列宽 `COLUMN_WIDTH_PX = 48` 同时硬编码于 `BookingGrid` / `RoomRow` / `useVisibleRange` 三处，`TOTAL_DAYS = 30` 与 `VISIBLE_COLUMNS = 14` 也分散在 `BookingGrid` 与 hook 内部，主体 `minWidth` 计算里的 `+ 140` 更是无名魔法数字；与此同时承载这些值的类型 `AppConfig` 与单例 `APP_CONFIG` 命名为"应用级"，但所有字段（日历窗口、列宽、表头背景）实际都是 Booking 网格专属，抽象层级与命名严重错位 —— 既无法跨文件保持一致（任何一处改 48 都会引入视觉漂移），也阻碍未来 Messages 等其他域配置的并行扩展。
 5. SWR 请求层缺乏抽象，调用样板大量散落且各自为政：(1) 同一份 `(url) => fetch(url).then(r => r.json())` fetcher 在 `pages/index` / `pages/messages/index` / `Sidebar` / `BookingDrawer` 共复制 4 份，且全部缺失 `res.ok` 校验，4xx/5xx 响应会被当作正常 JSON 渲染；(2) API 路径以字符串字面量出现在多处（`'/api/tickets'` 在 Sidebar 与 messages 页各写一遍，`/api/tickets/:id/read` 在 messages 页内联拼接），改路径需要全仓搜索；(3) 写操作（`POST /api/tickets/:id/read`）以裸 `fetch` 形式与 SWR 体系并行存在，乐观更新模板（mutate + optimisticData + revalidate）只能耦合写在页面组件里，复用与单测都无从下手；(4) 没有错误类型定义，状态码差异无法在调用层做精细分支处理。整体表现为"SWR 用了，但请求层并没有真正建立"。
 6. 日期处理逻辑分散且缺少统一基准，存在跨日边界（off-by-one）隐患：(1) `new Date()` 在 `lib/bookingConfig`（`DATE_RANGE_START` / `DATE_RANGE_END`）、`lib/mockData.dateStr`、`BookingGrid.getDayLabels`、`RoomRow.useMemo` 共 8+ 处独立调用，模块求值期与组件渲染期分别取系统时间，若用户在 23:59 → 00:01 边界触发渲染，"今天"在不同文件取到不同值，导致日历窗口起点、mock 锚点、预订条偏移量出现 1 天漂移；(2) 跨日天数计算以 `(new Date(a) - new Date(b)) / (1000 * 60 * 60 * 24)` 手算样板形式重复 4 处，遇夏令时切换会得到非整数误差，且无法统一替换实现；(3) 日期格式化（`d.getMonth() + 1` / `toISOString().split('T')[0]`）散落各处，无单一事实来源，未来若需扩展时区 / 国际化 / 农历能力需要全文回改。整体表现为"日期处理"作为基础设施完全缺失，业务代码直接耦合 `Date` 原生 API。
-7. BookingDrawer缺少持久化能力, 可以通过url query做到持久化
+7. `BookingDrawer` 选中态仅以 `pages/index.tsx` 内部的 `useState<selectedBooking>` 维护，缺乏持久化与可分享性：(1) 刷新页面后选中态丢失，必须重新点击才能定位到原 Booking，对长会话操作（编辑、查阅详情）极不友好；(2) URL 不携带选中信息，链接无法分享给同事直达指定 Booking；(3) 浏览器前进/后退按钮不能在"打开/关闭 Drawer"两态间往返，与用户对路由式 UI 的常规预期相悖；(4) 与 `/messages` 通过 `ticketId` query 派生选中态的策略形成双标，整站交互范式不一致。
 8. `BookingDrawer`中`getStatusPillClass`缺少对`pengding`状态的处理, 需要补齐
 9. `STATUS_LABELS`和`BookingStatus`维护了多份, BookingStatus改为枚举, 统一维护引用
 10: /message 只需要ticketId即可定位, 无需houseId
@@ -53,6 +53,14 @@
    - **格式化下沉**：`BookingGrid.getDayLabels` 中的 `${d.getMonth()+1}/${d.getDate()}` 字符串拼接改为 `buildDayLabels` 调用，未来切语言 / 改格式（如 `MM-DD` / `D MMM`）只需改 `lib/date.ts` 一处，业务零侵入。
    - **效果**：仓库内除 `lib/date.ts` 外**零** `new Date(` 运行时调用（`grep` 验证残留仅为注释中的反引号引用）；日期处理具备统一替换点、单一基准时间、可测试纯函数、可扩展插件机制四项基础设施特性。
    - **覆盖清单**：新增 `lib/date.ts`；改动 `lib/bookingConfig.ts` / `lib/mockData.ts` / `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/RoomRow.tsx` 共 4 个文件；`package.json` 新增依赖 `dayjs`。`tsc --noEmit` 校验通过，无新增类型错误。
+7. 按 **「URL 即真理来源 + SSR 首屏兜底」** 原则把 BookingDrawer 选中态从组件本地 `useState` 上提至路由 query，与 `/messages` 的 `ticketId` 策略对齐，整站统一"路由式 UI"范式：
+   - **状态归属上提**：删除 `pages/index.tsx` 内 `useState<Booking | null>` 持有的 `selectedBooking`，改由 `useRouter().query.bookingId` 派生：`bookings?.find(b => b.id === currentBookingId) ?? null`。Drawer 开合不再有独立的 React state，URL 是唯一事实来源，刷新 / 分享 / 前进后退三类入口的还原路径完全一致，杜绝"组件 state ↔ URL"双真理来源漂移。
+   - **SSR 首屏兜底**：新增 `getServerSideProps` 从 `context.query.bookingId` 注入 `initialBookingId`，覆盖客户端水合前 `useRouter().query` 为空对象的初次渲染窗口，避免 `?bookingId=xxx` 直链访问时首帧 Drawer 闪烁；与 `/messages` 的 `initialTicketId` SSR 模式同构。
+   - **关键边界 ——「兜底仅作用于水合前」**：派生 `currentBookingId` 必须以 `router.isReady` 为分水岭：水合前用 `initialBookingId` 兜底首帧；水合完成后严格以 `router.query.bookingId` 为单一事实来源（`undefined` 即关闭）。若图省事写成 `(router.query.bookingId as string) ?? initialBookingId`，关闭 Drawer 时 query 中 `bookingId` 被移除变为 `undefined`，`??` 会立即回退到 SSR 注入的旧值，Drawer 永远关不掉 —— 这是把 SSR 兜底误用为长期回退源造成的双真理来源回归。
+   - **导航语义收敛**：点击 Booking 调用 `router.push({ query: { ...query, bookingId } }, undefined, { shallow: true })`，关闭 Drawer 通过解构剔除 `bookingId` 后 `push` 回净化 query；`shallow: true` 保证不触发 `getServerSideProps` 二次执行，URL 切换零网络代价。保留其余 query 参数（如未来可能并存的过滤器），关闭 Drawer 不会误清。
+   - **下游零侵入**：`BookingDrawer` 接口（`booking` / `onClose` props）保持不变，详情接口 `useBookingDetail(booking?.id)` 自然按新选中项重新发起 SWR 请求，缓存命中即时复用；`BookingGrid` 的 `onBookingClick` 契约不变，`pages/index.tsx` 内部把回调从 `setSelectedBooking` 替换为 `openBooking` 即可，调用层零感知。
+   - **效果**：(a) 用户在 Drawer 打开状态刷新页面，选中态精确还原；(b) 链接 `?bookingId=xxx` 可直接分享，他人打开即定位到同一 Booking；(c) 浏览器前进/后退按钮可在 Drawer 开合两态间往返；(d) 与 `/messages` 形成统一的"URL 驱动 UI"心智模型。
+   - **覆盖清单**：改动 `pages/index.tsx` 单文件（新增 `getServerSideProps`、改用 `useRouter` 派生选中态、移除本地 `useState`）。`tsc --noEmit` 校验通过，无新增类型错误。
 
 ## 权衡取舍
 
