@@ -61,14 +61,10 @@ export function RoomRow({
             new Date(config.dateRangeStart).getTime()) /
             (1000 * 60 * 60 * 24),
         );
-        const color = getBookingStatus(b.status);
+        const color = STATUS_COLORS[b.status] ?? "#ccc";
         return { booking: b, startDay, endDay, color };
       });
   }, [bookings, visibleStartIndex, visibleEndIndex, config.dateRangeStart]);
-
-  const getBookingStatus = (status: BookingStatus): string => {
-    return STATUS_COLORS[status] ?? "#ccc";
-  };
 
   const isHovered = hoveredCell?.rowId === rowId;
 
