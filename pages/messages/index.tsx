@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import type { GetServerSideProps, NextPage } from 'next'
 import { useRouter } from 'next/router'
 import { useSWRConfig } from 'swr'
@@ -38,13 +38,30 @@ const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
   // Use ticketId from URL query, fallback to SSR initial prop
   const currentTicketId = (router.query.ticketId as string) ?? initialTicketId
 
+  const activeTicket = tickets?.find(t => t.id === currentTicketId)
+
+  /**
+   * URL-driven 已读副作用：当 currentTicketId 指向的 ticket 处于未读态时，
+   * 触发统一请求层的"乐观更新 + 远端写入 + revalidate"流程。
+   *
+   * 为何挂在 effect 而非 click handler：click 仅是诸多入口之一，直接 URL
+   * 访问、SSR 首屏命中 initialTicketId、浏览器前进/后退、外部链接跳转都
+   * 不会触发 click。把"已读"绑定到 URL 变化（通过 currentTicketId 派生），
+   * 所有入口收敛到同一条副作用路径，click handler 退化为纯导航。
+   *
+   * 依赖说明：tickets 必入依赖，覆盖"SSR 已带 ticketId 但 SWR 数据尚未
+   * 到位"的初次渲染场景；ticket.unread 在乐观更新后翻转为 false，effect
+   * 自然终止递归，无需额外去重。
+   */
+  useEffect(() => {
+    if (!tickets || !currentTicketId) return
+    const ticket = tickets.find(t => t.id === currentTicketId)
+    if (ticket?.unread) markTicketRead(mutate, ticket.id)
+  }, [currentTicketId, tickets, mutate])
+
   const handleTicketClick = (ticket: Ticket) => {
-    // 命中未读 ticket 时由统一请求层完成乐观更新 + 远端写入 + revalidate
-    if (ticket.unread) markTicketRead(mutate, ticket.id)
     router.push(`/messages?ticketId=${ticket.id}&houseId=${ticket.houseId}`)
   }
-
-  const activeTicket = tickets?.find(t => t.id === currentTicketId)
 
   return (
     <div className={styles.page}>

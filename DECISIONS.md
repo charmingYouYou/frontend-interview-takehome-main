@@ -8,7 +8,8 @@
 6. 日期处理逻辑分散且缺少统一基准，存在跨日边界（off-by-one）隐患：(1) `new Date()` 在 `lib/bookingConfig`（`DATE_RANGE_START` / `DATE_RANGE_END`）、`lib/mockData.dateStr`、`BookingGrid.getDayLabels`、`RoomRow.useMemo` 共 8+ 处独立调用，模块求值期与组件渲染期分别取系统时间，若用户在 23:59 → 00:01 边界触发渲染，"今天"在不同文件取到不同值，导致日历窗口起点、mock 锚点、预订条偏移量出现 1 天漂移；(2) 跨日天数计算以 `(new Date(a) - new Date(b)) / (1000 * 60 * 60 * 24)` 手算样板形式重复 4 处，遇夏令时切换会得到非整数误差，且无法统一替换实现；(3) 日期格式化（`d.getMonth() + 1` / `toISOString().split('T')[0]`）散落各处，无单一事实来源，未来若需扩展时区 / 国际化 / 农历能力需要全文回改。整体表现为"日期处理"作为基础设施完全缺失，业务代码直接耦合 `Date` 原生 API。
 7. BookingDrawer缺少持久化能力, 可以通过url query做到持久化
 8. `BookingDrawer`中`getStatusPillClass`缺少对`pengding`状态的处理, 需要补齐
-9. `STATUS_LABELS`和`BookingStatus`维护了多份, 若依产生问题
+9. `STATUS_LABELS`和`BookingStatus`维护了多份, BookingStatus改为枚举, 统一维护引用
+10: /message 只需要ticketId即可定位, 无需houseId
 
 ## 应用的修复
 <!-- 对于每个修复：你改变了什么，为什么，以及你选择了什么方法 -->
