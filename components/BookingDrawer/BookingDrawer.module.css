@@ -145,10 +145,9 @@
   letter-spacing: var(--letter-spacing-wide);
 }
 
-/* 加载提示：紧跟附加详情标题，弱化呈现。 */
+/* 加载提示槽位：仅承担与"Additional Details"标题之间的留白；内部
+   InlineLoading 自带字号 / 颜色 / spinner 视觉。 */
 .loadingHint {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-disabled);
   margin-left: var(--spacing-3);
 }
 

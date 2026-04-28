@@ -3,6 +3,7 @@ import type { GetServerSideProps, NextPage } from 'next'
 import { useRouter } from 'next/router'
 import { BookingGrid } from '@/components/BookingGrid/BookingGrid'
 import { BookingDrawer } from '@/components/BookingDrawer/BookingDrawer'
+import { AsyncBoundary, InlineLoading } from '@/components/Async/AsyncBoundary'
 import { ROOM_UNITS } from '@/lib/mockData'
 import { useBookings } from '@/lib/api'
 import type { Booking } from '@/types'
@@ -24,7 +25,7 @@ interface BookingsPageProps {
  */
 const BookingsPage: NextPage<BookingsPageProps> = ({ initialBookingId }) => {
   const router = useRouter()
-  const { data: bookings, isLoading } = useBookings()
+  const { data: bookings, error, isLoading, isValidating, mutate } = useBookings()
 
   // 水合前 router.query 为空对象，用 SSR 注入的 initialBookingId 兜底首帧；
   // 水合完成后必须严格以 URL query 为单一事实来源 —— 否则 closeBooking
@@ -58,22 +59,28 @@ const BookingsPage: NextPage<BookingsPageProps> = ({ initialBookingId }) => {
       {/* Page header */}
       <div className={styles.header}>
         <h1 className={styles.title}>Booking Calendar</h1>
-        {isLoading && <span className={styles.loadingHint}>Loading...</span>}
+        {/* 后台 revalidating 时给一个弱化的 inline 提示，loading / error / empty 主态由下方 AsyncBoundary 接管 */}
+        {!isLoading && isValidating && <InlineLoading label="Refreshing..." />}
       </div>
 
       {/* Grid */}
       <div className={styles.gridWrap}>
-        {bookings ? (
-          <BookingGrid
-            roomUnits={ROOM_UNITS}
-            bookings={bookings}
-            onBookingClick={openBooking}
-          />
-        ) : (
-          <div className={styles.placeholder}>
-            {isLoading ? 'Loading bookings...' : 'No bookings found.'}
-          </div>
-        )}
+        <AsyncBoundary
+          data={bookings}
+          error={error}
+          isLoading={isLoading}
+          isEmpty={(list) => list.length === 0}
+          emptyFallback={<div className={styles.placeholder}>No bookings found.</div>}
+          onRetry={() => mutate()}
+        >
+          {(list) => (
+            <BookingGrid
+              roomUnits={ROOM_UNITS}
+              bookings={list}
+              onBookingClick={openBooking}
+            />
+          )}
+        </AsyncBoundary>
       </div>
 
       {/* Booking detail drawer */}

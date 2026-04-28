@@ -1,8 +1,9 @@
 import React from 'react'
 import clsx from 'clsx'
-import { Booking, BookingStatus } from '@/types'
+import { Booking, BookingDetail, BookingStatus } from '@/types'
 import { STATUS_LABELS, STATUS_PILL_CLASS_NAMES } from '@/lib/bookingStatus'
 import { useBookingDetail } from '@/lib/api'
+import { AsyncBoundary } from '@/components/Async/AsyncBoundary'
 import styles from './BookingDrawer.module.css'
 
 interface BookingDrawerProps {
@@ -38,7 +39,7 @@ function getStatusPillClass(status: BookingStatus): string {
  *   自 Booking，类型层无须分支即可天然兼容。
  */
 export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
-  const { data: detail, isLoading } = useBookingDetail(booking?.id)
+  const { data: detail, error, isLoading, mutate } = useBookingDetail(booking?.id)
 
   if (!booking) return null
 
@@ -87,20 +88,29 @@ export function BookingDrawer({ booking, onClose }: BookingDrawerProps) {
         <div className={styles.additional}>
           <h3 className={styles.additionalTitle}>
             Additional Details
-            {isLoading && <span className={styles.loadingHint}>loading...</span>}
           </h3>
 
-          {detail ? (
-            <>
-              <Row label="Email" value={detail.guestEmail} />
-              <Row label="Phone" value={detail.guestPhone} />
-              <Row label="Source" value={detail.source} />
-              <Row label="Payment" value={detail.paymentStatus} />
-              {detail.specialRequests && <Row label="Requests" value={detail.specialRequests} />}
-            </>
-          ) : !isLoading ? (
-            <p className={styles.emptyHint}>No additional details available.</p>
-          ) : null}
+          {/* 附加详情区由 AsyncBoundary 统一接管 loading / error / empty 三态：
+              - loading 在标题侧已用 InlineLoading 表达，本区域内首次加载交给 boundary 默认 Loading 占位；
+              - error 由 boundary 渲染降级 UI，避免抽屉只有标题没有任何反馈；
+              - empty 沿用原 emptyHint 文案，保持视觉连续性。 */}
+          <AsyncBoundary<BookingDetail>
+            data={detail}
+            error={error}
+            isLoading={isLoading}
+            emptyFallback={<p className={styles.emptyHint}>No additional details available.</p>}
+            onRetry={() => mutate()}
+          >
+            {(d) => (
+              <>
+                <Row label="Email" value={d.guestEmail} />
+                <Row label="Phone" value={d.guestPhone} />
+                <Row label="Source" value={d.source} />
+                <Row label="Payment" value={d.paymentStatus} />
+                {d.specialRequests && <Row label="Requests" value={d.specialRequests} />}
+              </>
+            )}
+          </AsyncBoundary>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@ import { useSWRConfig } from 'swr'
 import clsx from 'clsx'
 import { Ticket } from '@/types'
 import { useTickets, markTicketRead } from '@/lib/api'
+import { AsyncBoundary } from '@/components/Async/AsyncBoundary'
 import styles from './index.module.css'
 
 interface MessagesPageProps {
@@ -28,7 +29,7 @@ interface MessagesPageProps {
 const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
   const router = useRouter()
   const { mutate } = useSWRConfig()
-  const { data: tickets } = useTickets()
+  const { data: tickets, error, isLoading, mutate: revalidateTickets } = useTickets()
 
   // Use ticketId from URL query, fallback to SSR initial prop
   const currentTicketId = (router.query.ticketId as string) ?? initialTicketId
@@ -69,34 +70,48 @@ const MessagesPage: NextPage<MessagesPageProps> = ({ initialTicketId }) => {
           Messages
         </div>
 
-        {tickets?.map(ticket => {
-          const isActive = ticket.id === currentTicketId
-          return (
-            <div
-              key={ticket.id}
-              onClick={() => handleTicketClick(ticket)}
-              className={clsx(styles.ticketItem, isActive && styles.ticketItemActive)}
-            >
-              <div className={styles.ticketHeader}>
-                <span className={clsx(styles.ticketGuest, ticket.unread && styles.ticketGuestUnread)}>
-                  {ticket.guestName}
-                </span>
-                {ticket.unread && (
-                  <span className={styles.unreadDot} />
-                )}
-              </div>
-              <div className={clsx(styles.ticketSubject, ticket.unread && styles.ticketSubjectUnread)}>
-                {ticket.subject}
-              </div>
-              <div className={styles.ticketPreview}>
-                {ticket.lastMessage}
-              </div>
-              <div className={styles.ticketHouse}>
-                {ticket.houseName}
-              </div>
-            </div>
-          )
-        })}
+        {/* 列表三态由 AsyncBoundary 统一接管：原本 `tickets?.map` 在 loading
+            与 error 路径上都是「静默空列表」，对用户没有任何反馈。 */}
+        <AsyncBoundary<Ticket[]>
+          data={tickets}
+          error={error}
+          isLoading={isLoading}
+          isEmpty={(list) => list.length === 0}
+          onRetry={() => revalidateTickets()}
+        >
+          {(list) => (
+            <>
+              {list.map(ticket => {
+                const isActive = ticket.id === currentTicketId
+                return (
+                  <div
+                    key={ticket.id}
+                    onClick={() => handleTicketClick(ticket)}
+                    className={clsx(styles.ticketItem, isActive && styles.ticketItemActive)}
+                  >
+                    <div className={styles.ticketHeader}>
+                      <span className={clsx(styles.ticketGuest, ticket.unread && styles.ticketGuestUnread)}>
+                        {ticket.guestName}
+                      </span>
+                      {ticket.unread && (
+                        <span className={styles.unreadDot} />
+                      )}
+                    </div>
+                    <div className={clsx(styles.ticketSubject, ticket.unread && styles.ticketSubjectUnread)}>
+                      {ticket.subject}
+                    </div>
+                    <div className={styles.ticketPreview}>
+                      {ticket.lastMessage}
+                    </div>
+                    <div className={styles.ticketHouse}>
+                      {ticket.houseName}
+                    </div>
+                  </div>
+                )
+              })}
+            </>
+          )}
+        </AsyncBoundary>
       </div>
 
       {/* Message view */}

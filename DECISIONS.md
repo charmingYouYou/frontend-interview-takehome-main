@@ -11,10 +11,10 @@
 9. `BookingStatus` 与其展示元数据存在多份事实来源：(1) `BookingStatus` 以 string union 形式声明在 `types/index.ts`，运行时无可枚举句柄，下游只能写裸字面量 `'in_house'` / `'pending'`；(2) `STATUS_LABELS`（`BookingDrawer`）与 `STATUS_COLOR_VARS`（`RoomRow`）以同义字面量 key 在两个组件中独立维护；(3) 任何一方新增 / 删除状态都需要跨文件同步修改，且 `Record<…, T>` 漏写不会被 TS 静态发现 —— issue 8 即为此类典型。需将 `BookingStatus` 改造为枚举（运行时可枚举 + nominal 类型），并把状态域的展示元数据集中到单一模块维护。
 10. `/messages` 路由 query 同时维护 `ticketId` + `houseId` 两个参数，但 `houseId` 是 `ticket` 的派生属性（`tickets.find(t => t.id === ticketId).houseId` 即可还原），构成"双真理来源"：刷新 / 分享 / 浏览器前进后退路径下需额外约束 `houseId` 与 `ticketId` 互相一致，否则可能出现"ticket 与 house 不同源"的非法 URL 状态。语义上 `ticketId` 已具完整定位能力，`houseId` 应作为派生量从 ticket 数据查表得到，不应进入 URL。
 11. `BookingDrawer` 共有字段事实来源错位：抽屉的 Guest / Room / Dates / Status / Amount 五个共有字段全部直接从父级透传的 `booking` prop 渲染，而 `useBookingDetail` 拉回的 `detail` 仅被消费在「Additional Details」区。语义上 `booking` 只是日历列表视图的快照（用于 Drawer 打开瞬间的乐观首屏），`detail` 才是服务端权威数据；当 detail 命中后共有字段未切换到 detail，会导致：(1) 服务端在用户打开抽屉期间更新（如 status 由 `pending` 变为 `confirmed`、totalAmount 调整、改房）时，抽屉持续展示列表快照旧值，与详情区的最新数据形成同屏不一致；(2) 列表数据与详情接口字段口径若有差异（如格式化、汇率换算），抽屉会同时呈现两套口径；(3) 共有字段事实来源在视图层处于"未声明"状态，后续 detail 接口扩展任何字段都需要逐处判断要不要回切。根因是缺少"detail（远端权威） > booking（首屏占位）"的优先级约定。
-12. 全局统一的错误捕获处理和Loading通用组件, 处理各自swr下的loading状态
+12. 异步态渲染缺乏统一基础设施，loading / error / empty 三态各自为政：(1) `pages/index` 在页头用 `<span>Loading...</span>` 表达加载态、网格区用 `<div>Loading bookings.../No bookings found.</div>` 三元混写表达 loading 与 empty，两处文案各写一遍；(2) `BookingDrawer` 的附加详情区以 `isLoading && <span>loading...</span>` + `detail ? <Rows> : !isLoading ? <empty> : null` 三层条件嵌套表达三态，控制流跳跃且新增分支极易遗漏；(3) `pages/messages` 与 `Sidebar` 在 loading / error 路径上完全静默渲染空列表，对用户没有任何反馈；(4) **错误态在视图层全局缺位** —— 没有任何组件消费 SWR 的 `error` 字段，4xx/5xx / 网络异常一旦发生只能在控制台看到 `httpGet` 抛出，UI 表现为"永远加载中"或"永远空数据"；(5) 没有 React 错误边界，渲染期任意一处抛错（例如下游组件 props 解构失败）即整树白屏。整体表现为"loading 文案是装饰品而不是契约、error 是缺席状态、empty 与 loading 视觉与文案到处复制"。
 13. BookingGrid的roomBookings每次都生成新数组, 导致重渲染, 要useMemo
 14. RoomRow的日格背景hover可以用css实现, 日格背景应该永不重渲染, 只有booking bar重渲染
-15. 首行首列应该sticky
+15. BookingGrid首行首列应该sticky
 16. BookingGrid缺少a11y
 17. 缺少单测和E2E
 
@@ -91,6 +91,21 @@
     - **乐观首屏语义保留**：`booking` 仍作为 Drawer 打开瞬间的占位（`useBookingDetail` 拉取期间 detail 为 undefined），保证抽屉不会出现整面骨架屏抖动；附加详情区（Email / Phone / Source / Payment / Requests）继续严格依赖 detail 渲染，loading / 缺失态各自有占位文案，与共有字段的「占位 → 权威」切换互不干扰。
     - **数据契约文档化**：把"detail > booking"优先级约定写入组件头注释，明确 booking 的角色仅为「列表视图快照、首屏占位」，detail 才是事实来源；新增字段时按同一约定接入即可，避免再次出现共有字段事实来源未声明的退化。
     - **覆盖清单**：改动 `components/BookingDrawer/BookingDrawer.tsx` 单文件；`tsc --noEmit` 校验通过，无新增类型错误。
+12. 按 **「异步态视图层基础设施 + 错误捕获分层」** 原则建立统一的 loading / error / empty 渲染契约与全局错误边界，把原本散落在 4 个文件中的状态分支收敛到统一的 `<AsyncBoundary>` 与 `<ErrorBoundary>`：
+    - **统一异步态外壳（`components/Async/AsyncBoundary.tsx`）**：直接消费 SWR 返回的 `{ data, error, isLoading }` 三元组，按 `error > loading > empty > success` 优先级路由到对应占位（错误优先于 loading 是因为 SWR 失败时会保留 `isLoading=false` + `error` 对象，写反则错误态被吞）。采用 render-prop（`children: (data: T) => ReactNode`）签名，数据未就绪时不构造叶子组件，TypeScript 在闭包内自然收敛为非空 `T`，调用方零样板、零 `data!` 强断言。
+    - **通用占位组件**：同模块导出 `<Loading>`（块级 spinner + 文案，`role=status` + `aria-live=polite`）、`<InlineLoading>`（行内紧凑场景，如"标题 + 加载中"）、`<ErrorMessage>`（块级错误，`role=alert`，可选 Retry 按钮）、`<EmptyState>`（弱化空态文案）四件套，外观全部由 `AsyncBoundary.module.css` 消费 tokens 控制，与项目设计系统天然对齐；`AsyncBoundary` 默认占位即调用这四件套，业务侧通常零定制即可使用。
+    - **应用根级错误边界（`components/Async/ErrorBoundary.tsx`）**：以 React 类组件实现 `getDerivedStateFromError` + `componentDidCatch`，捕获渲染期未处理异常避免白屏；默认降级 UI 复用 `<ErrorMessage>` 保持视觉一致，`reset` 回调清空 error state 配合用户重试或路由切换即可恢复。组件头注释明确职责边界 —— 仅处理"渲染抛错"，SWR 网络错误由 `AsyncBoundary` 在视图层处理、不冒泡到此处；事件回调 / setTimeout / Promise 内部抛错按 React 文档约定属业务自行处理范畴。
+    - **请求层全局错误捕获（`SWRConfig.onError`）**：在 `pages/_app.tsx` 用 `<SWRConfig>` 包裹根组件，挂载 `onError(error, key)` 钩子作为全局观测点（当前实现走 `console.error`，注释中标注未来可接入 Sentry / Toast）。请求层错误同时也由视图层 `<AsyncBoundary>` 就近渲染降级 UI，二者职责互补：observability 走全局回调，user-facing recovery 走就近边界。
+    - **请求层默认指数退避重试（`SWRConfig.onErrorRetry`）**：暂态错误（5xx / 网络抖动 / fetch reject）默认按指数退避自动重试 3 次，节奏 ≈ 1s → 2s → 4s，单次封顶 30s，所有 `useSWR` 自动获得无须各自配置；4xx 客户端错误（HttpError.status ∈ [400, 500)）一律跳过自动重试 —— 资源不存在 / 鉴权失败 / 参数错误等场景重试只会放大错误曲线，应直接进入错误态由用户决定下一步。重试参数（`SWR_RETRY_COUNT` / `SWR_RETRY_BASE_INTERVAL_MS` / `SWR_RETRY_MAX_DELAY_MS`）抽为模块级常量，便于单测注入与未来按域差异化覆盖（如重要写操作单独提高 retryCount）。耗尽重试预算后由 `<AsyncBoundary>` 的 Retry 按钮提供手动二次恢复入口，形成"自动退避 → 手动重试"两段式恢复链。
+    - **消费方改造（4 文件）**：
+      - `pages/index`：把"页头 `<span>Loading...</span>` + 网格区 `bookings ? <BookingGrid> : <placeholder Loading.../No bookings found.</placeholder>`"两段三态混写替换为单层 `<AsyncBoundary>`，通过 `isEmpty={list => list.length === 0}` 区分 empty 与 loading，并把页头 inline 提示降级为"仅 revalidating 时展示 `<InlineLoading>`"，避免与下方主态重复发声。
+      - `BookingDrawer`：附加详情区原"`isLoading && <span>loading...</span>` + `detail ? <Rows> : !isLoading ? <empty> : null`"三层嵌套替换为单层 `<AsyncBoundary>`，标题侧 inline loading 改用 `<InlineLoading>` 复用同一视觉语言；`onRetry={mutate}` 让用户在 detail 拉取失败时可手动重试，不再需要关闭重开抽屉。
+      - `pages/messages`：原本 `tickets?.map(...)` 在 loading / error 路径上完全静默渲染空列表 —— 现以 `<AsyncBoundary>` 包裹列表渲染，loading 显示 spinner、error 显示带 Retry 的错误卡片、tickets 为空数组时显示 EmptyState，三态视觉契约对齐。
+      - `pages/_app`：根布局加一层 `<SWRConfig onError>` + `<ErrorBoundary>`，所有页面无须各自处理。
+    - **死样式清理**：`pages/index.module.css` 的 `.loadingHint` 与 `BookingDrawer.module.css` `.loadingHint` 的字号 / 颜色规则因迁移到 `<InlineLoading>` 内部而成为死代码，已分别删除 / 收敛为仅承担留白的槽位类。
+    - **a11y 前置**：所有占位组件就位即附 `role` / `aria-live` 属性，未来 issue 16 的 a11y 改造可直接复用这套基础设施，无需返工。
+    - **效果**：(a) loading / error / empty 三态在四个消费点视觉与文案统一，新增任何 SWR 调用接入 `<AsyncBoundary>` 即开箱获得三态渲染；(b) 错误态在视图层从"全局缺席"变为"就近可见 + 可重试"；(c) 渲染期意外异常不再白屏；(d) 全局观测点单一，便于后续接入 Sentry / Toast / Datadog。
+    - **覆盖清单**：新增 `components/Async/AsyncBoundary.tsx` / `components/Async/AsyncBoundary.module.css` / `components/Async/ErrorBoundary.tsx` 共 3 个文件；改动 `pages/_app.tsx` / `pages/index.tsx` / `pages/index.module.css` / `pages/messages/index.tsx` / `components/BookingDrawer/BookingDrawer.tsx` / `components/BookingDrawer/BookingDrawer.module.css` 共 6 个文件；`tsc --noEmit` 与 `next build` 均通过，无新增类型错误。
 
 ## 权衡取舍
 
@@ -106,4 +121,5 @@
 1. 如果Booking Detail Drawer支持刷新仍然显示, 在复杂业务场景下需要考虑优先加载渲染Drawer, 而后再渲染日历路由
 2. 无极滚动日历/甘特在已有虚拟滚动后, 要看是否仍有性能问题, 若还是有问题, 可能要进一步考虑有canvas去做
 3. 日历数据分页获取
-3. UI适配多设备, 如pc小屏是否收起Sidebar, 是否适配pad和mobile
+4. UI适配多设备, 如pc小屏是否收起Sidebar, 是否适配pad和mobile
+5. 把Loading优化为骨架屏, 提升用户体验

@@ -1,0 +1,121 @@
+/**
+ * AsyncBoundary 样式模块
+ *
+ * 职责：承载 Loading / InlineLoading / ErrorMessage / EmptyState 四种通用
+ *       占位的视觉规格。仅消费 tokens.css 暴露的 CSS 变量，不出现裸 hex
+ *       与魔法数字。
+ * 边界：本模块不耦合任何业务组件 —— Booking / Messages 等页面均通过
+ *       `<AsyncBoundary>` / `<Loading>` 等导出消费同一套外观。
+ *
+ * 已知 token 缺口（保持当前 token 表不扩张）：
+ *   - .spinner 边框 2px / 14px 直径 / .inlineSpinner 10px 直径：均为 spinner
+ *     特化几何量，落在 size token 表语义之外，保留为字面量。
+ *   - .retryButton 1px 边框：与 tokens.css 中其它 1px 边框保持同口径，
+ *     沿用字面量；如未来扩展 --border-width-* 体系，集中在 token 层补齐即可。
+ */
+
+/* === Block 级 Loading：用于占据完整区域 ====================== */
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-3);
+  height: 100%;
+  min-height: 120px;
+  padding: var(--spacing-6);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-base);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border-strong);
+  border-top-color: var(--color-text-secondary);
+  border-radius: var(--radius-circle);
+  animation: spin var(--motion-duration-slow) linear infinite;
+  animation-duration: 800ms; /* 旋转节奏比 motion token 略慢，保留专属时长 */
+}
+
+.loadingLabel {
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+}
+
+/* === Inline 级 Loading：用于"标题 + 加载提示"紧凑场景 ======= */
+.inlineLoading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-disabled);
+}
+
+.inlineSpinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--color-border-strong);
+  border-top-color: var(--color-text-tertiary);
+  border-radius: var(--radius-circle);
+  animation: spin 800ms linear infinite;
+}
+
+/* === Error 占位 ============================================== */
+.error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-3);
+  height: 100%;
+  min-height: 120px;
+  padding: var(--spacing-6);
+  text-align: center;
+}
+
+.errorTitle {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-feedback-danger);
+}
+
+.errorDetail {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  max-width: 360px;
+}
+
+.retryButton {
+  margin-top: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-5);
+  font-size: var(--font-size-base);
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.retryButton:hover {
+  background: var(--color-bg-muted);
+}
+
+/* === Empty 占位 ============================================== */
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 120px;
+  padding: var(--spacing-6);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-base);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -32,12 +32,6 @@
   font-weight: var(--font-weight-semibold);
 }
 
-/* 顶部加载提示：弱化色 + base 字号，紧随标题展示。 */
-.loadingHint {
-  font-size: var(--font-size-base);
-  color: var(--color-text-muted);
-}
-
 /* 网格容器：占据剩余高度，内部 BookingGrid 自行处理滚动。 */
 .gridWrap {
   flex: 1;
