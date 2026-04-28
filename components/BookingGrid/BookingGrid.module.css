@@ -4,30 +4,63 @@
  * 职责：承载预订网格容器、表头（房型列 + 日期列）以及可滚动主体的所有静态样式，
  *       仅消费 styles/tokens.css 暴露的 CSS 变量，不出现裸 hex 与魔法数字。
  * 边界：
- *   - 列宽（COLUMN_WIDTH_PX）、整体最小宽度（TOTAL_DAYS * COLUMN_WIDTH_PX +
- *     LABEL_COLUMN_WIDTH_PX）等依赖 JS 常量的几何值，仍由组件以 inline style 注入；
+ *   - 列宽（COLUMN_WIDTH_PX）、内层 wrapper 最小宽度（TOTAL_DAYS *
+ *     COLUMN_WIDTH_PX + LABEL_COLUMN_WIDTH_PX）等依赖 JS 常量的几何值，仍由
+ *     组件以 inline style 注入；
  *   - 表头背景色已下沉到 token 层（--color-bg-booking-header），由 .headerLabel /
  *     .headerDays 直接消费，组件层不再以 inline style 注入；
- *   - 本文件只描述布局结构与视觉规格，不涉及交互态切换（无 hover / active 类）。
+ *   - 本文件只描述布局结构、视觉规格与 sticky 层级；不涉及交互态切换（无
+ *     hover / active 类）。
+ *
+ * 滚动 / sticky 模型：
+ *   - .root 仅作为裁剪容器（overflow:hidden），无滚动；
+ *   - .body 是网格唯一的滚动容器（overflow:auto，纵 / 横双向）；
+ *   - .inner 以 inline minWidth 撑出 TOTAL_DAYS × COLUMN + LABEL 全宽，作为
+ *     表头与所有 RoomRow 的共同 wrapper；
+ *   - .header 通过 position:sticky; top:0 吸附到 .body 视口顶部；
+ *   - .headerLabel 通过 position:sticky; left:0 吸附到 .body 视口左侧（同时
+ *     与父级 .header 的 sticky-top 叠加 → 角落格双向吸附）；
+ *   - z-index 分层（.body 滚动上下文内）：4（角落 .headerLabel）> 3（表头
+ *     .header）> 2（行标签 RoomRow .label）> 1（预订条 .bar）> 0（日格 .cell），
+ *     形成清晰的二维吸附栈，确保滚动时各层覆盖关系正确。
  */
 
-/* 根容器：纵向排布「表头 + 滚动主体」，撑满父容器并裁掉溢出。 */
+/* 根容器：裁剪容器，本身不滚动；网格滚动统一发生在内部 .body。 */
 .root {
-  display: flex;
-  flex-direction: column;
   height: 100%;
   overflow: hidden;
 }
 
-/* 表头：水平排列「房型槽 + 日期列区」，底部加粗分隔线区分主体区域。 */
+/* 唯一滚动容器：纵 / 横双向滚动，承载表头与所有 RoomRow。 */
+.body {
+  height: 100%;
+  overflow: auto;
+}
+
+/* 内层 wrapper：以 inline minWidth 撑出 TOTAL_DAYS × COLUMN + LABEL 全宽，
+ * 作为表头与全部 RoomRow 的水平基准；表头 sticky 与行标签 sticky 都以
+ * 本容器为参照计算位置。 */
+.inner {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 表头：sticky top:0 贴附 .body 视口顶部，纵滚时持续可见。 */
 .header {
   display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 3;
   border-bottom: 2px solid var(--color-border-strong);
   background: var(--color-bg-elevated);
 }
 
-/* 表头房型槽：与 RoomRow 行标签等宽，作为左侧固定列的视觉对位。 */
+/* 表头房型槽：与 RoomRow 行标签等宽，作为左侧固定列的视觉对位；
+ * sticky left:0 同时与父级 .header sticky-top 叠加 → 角落格双向吸附。 */
 .headerLabel {
+  position: sticky;
+  left: 0;
+  z-index: 1; /* 在 .header 内部上层（高于 .headerDays），结合 .header z=3 → 角落格全局最高 */
   width: var(--size-row-label-width);
   min-width: var(--size-row-label-width);
   padding: var(--spacing-3) var(--spacing-4);
@@ -37,10 +70,11 @@
   background: var(--color-bg-booking-header);
 }
 
-/* 表头日期列区：横向铺开可视范围内的日期单元，溢出由父级裁剪。 */
+/* 表头日期列区：按 TOTAL_DAYS 全量渲染，与下方 RoomRow 日格自然对齐；
+ * 不再需要 overflow:hidden（双 scroll container 隔离方案的遗留），横滚
+ * 由父级 .body 统一处理。 */
 .headerDays {
   flex: 1;
-  overflow: hidden;
   display: flex;
   background: var(--color-bg-booking-header);
 }
@@ -52,11 +86,4 @@
   text-align: center;
   border-right: 1px solid var(--color-border-default);
   color: var(--color-text-tertiary);
-}
-
-/* 滚动主体：双向滚动承载所有 RoomRow，scroll 事件驱动可视范围更新。 */
-.body {
-  flex: 1;
-  overflow-x: auto;
-  overflow-y: auto;
 }

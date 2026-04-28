@@ -14,16 +14,31 @@
   align-items: center;
   border-bottom: 1px solid var(--color-border-default);
   background: var(--color-bg-base);
-  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+  transition: background var(--motion-duration-fast)
+    var(--motion-easing-standard);
 }
 
 .row:hover {
   background: var(--color-bg-row-hover);
 }
 
-/* 行标签：固定宽度的房型名称槽位。 */
+/* 行 hover 时同步切换 .label 背景：.label 因 sticky-left 必须持有不透明
+ * 背景以遮挡下层内容，单独 `.row:hover` 只会改 .row 的背景而 .label 仍
+ * 显原色，造成"标签列不跟随 hover"的视觉断层；此处用后代选择器把 hover
+ * 信号显式下发给 .label，与 .row 整体保持视觉一致。 */
+.row:hover .label {
+  background: var(--color-bg-row-hover);
+}
+
+/* 行标签：固定宽度的房型名称槽位；sticky left:0 横滚时贴左固定，房型名
+ * 始终可见。z-index 高于 .bar / .cell，避免横滚时预订条从左侧穿透到标签
+ * 列上方；不透明背景 var(--color-bg-base) 防止下层内容透出。 */
 .label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
   width: var(--size-row-label-width);
+  height: var(--size-row-height);
   min-width: var(--size-row-label-width);
   padding: var(--spacing-3) var(--spacing-4);
   font-weight: var(--font-weight-medium);
@@ -31,7 +46,6 @@
   color: var(--color-text-primary);
   border-right: 1px solid var(--color-border-default);
   background: var(--color-bg-base);
-  z-index: 1;
 }
 
 /* 时间轴：定位上下文（position:relative），承载日格背景与预订条。 */
@@ -51,14 +65,17 @@
   height: var(--size-row-height);
   border-right: 1px solid var(--color-border-subtle);
   cursor: default;
-  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+  transition: background var(--motion-duration-fast)
+    var(--motion-easing-standard);
 }
 
 .cell:hover {
   background: var(--color-bg-cell-hover);
 }
 
-/* 预订条：跨日色块，背景色由组件按状态注入。 */
+/* 预订条：跨日色块，背景色由组件按状态注入。z-index 高于 .cell（确保盖
+ * 在日格分隔线之上），低于 .label 的 sticky-left 层级（横滚时不穿透到
+ * 标签列）。 */
 .bar {
   position: absolute;
   height: var(--size-bar-height);
@@ -72,5 +89,5 @@
   color: var(--color-text-on-status);
   overflow: hidden;
   white-space: nowrap;
-  z-index: 2;
+  z-index: 1;
 }

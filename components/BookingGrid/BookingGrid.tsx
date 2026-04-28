@@ -20,7 +20,16 @@ const EMPTY_BOOKINGS: Booking[] = []
  * BookingGrid：预订时间网格的顶层容器。
  *
  * 职责：组合表头（房型槽 + 日期列）与滚动主体（多个 RoomRow），并通过
- *       useVisibleRange 驱动横向虚拟化（仅渲染可视范围内的日期列与预订条）。
+ *       useVisibleRange 维护可视窗口供 BookingBars 数据层做窗口过滤。
+ * 滚动模型：整个网格只有一个滚动容器 `.body`，表头 `.header` 与全部
+ *          RoomRow 同处于 `.body` 内层 wrapper（以 `minWidth` 撑出全宽），
+ *          通过 `position: sticky` 实现首行（top:0）/ 首列（left:0）双向
+ *          吸附 —— 横滚时表头日期列与下方日格自然对齐、纵滚时房型标签
+ *          始终可见。原"双 scroll container 隔离 + 手动同步 scrollLeft"
+ *          的双源结构彻底消失，`.headerDays` 也不再需要 overflow:hidden。
+ * 表头渲染口径：表头日期列改为按 TOTAL_DAYS 全量渲染，与第 14 条 DayCells
+ *          的全量策略对齐；`useVisibleRange` 不再驱动表头视图，仅供
+ *          BookingBars 数据层过滤使用。
  * 重渲染抑制：bookings 全集按 roomId 一次性 useMemo 分桶为 Map，每行
  *          通过 `bookingsByRoom.get(room.id)` 拿到引用稳定的子集；当
  *          bookings / roomUnits 未变（如滚动场景）时全部 RoomRow 的
@@ -33,12 +42,11 @@ const EMPTY_BOOKINGS: Booking[] = []
  *          BOOKING_CONFIG 读取（字段使用常量命名规范 UPPER_SNAKE_CASE），
  *          本组件不再保留任何魔法数字；同名字段以驼峰 props 显式透传给
  *          RoomRow，保持子组件接口稳定，便于复用与单测。
- * 视觉规格：所有静态样式（颜色 / 间距 / 边框 / 字号 / 表头背景）来自
- *         BookingGrid.module.css + tokens.css；仅依赖 JS 常量的几何值
- *         （列宽 COLUMN_WIDTH_PX、主体最小宽度
- *         TOTAL_DAYS * COLUMN_WIDTH_PX + LABEL_COLUMN_WIDTH_PX）仍以
- *         inline style 注入。原 BOOKING_HEADER_BACKGROUND 已迁移至 token
- *         层 --color-bg-booking-header，组件层不再持有此色值。
+ * 视觉规格：所有静态样式（颜色 / 间距 / 边框 / 字号 / 表头背景 / sticky
+ *          层级）来自 BookingGrid.module.css + tokens.css；仅依赖 JS 常量
+ *          的几何值（列宽 COLUMN_WIDTH_PX、内层 wrapper 最小宽度
+ *          TOTAL_DAYS * COLUMN_WIDTH_PX + LABEL_COLUMN_WIDTH_PX）仍以
+ *          inline style 注入。
  */
 export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGridProps) {
   const { visibleRange, handleScroll } = useVisibleRange()
@@ -68,37 +76,32 @@ export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGrid
 
   return (
     <div className={styles.root}>
-      {/* Header row */}
-      <div className={styles.header}>
-        <div className={styles.headerLabel}>
-          Room
-        </div>
-        <div className={styles.headerDays}>
-          {Array.from({ length: visibleRange.endIndex - visibleRange.startIndex + 1 }, (_, i) => {
-            const dayIndex = visibleRange.startIndex + i
-            if (dayIndex >= TOTAL_DAYS) return null
-            return (
-              <div
-                key={dayIndex}
-                className={styles.headerDay}
-                style={{
-                  width: COLUMN_WIDTH_PX,
-                  minWidth: COLUMN_WIDTH_PX,
-                }}
-              >
-                {dayLabels[dayIndex]}
-              </div>
-            )
-          })}
-        </div>
-      </div>
+      {/* 唯一滚动容器：表头与所有 RoomRow 同处其中，通过 sticky 实现首行 / 首列吸附 */}
+      <div className={styles.body} onScroll={handleScroll}>
+        <div
+          className={styles.inner}
+          style={{ minWidth: TOTAL_DAYS * COLUMN_WIDTH_PX + LABEL_COLUMN_WIDTH_PX }}
+        >
+          {/* Header row：sticky top:0 */}
+          <div className={styles.header}>
+            <div className={styles.headerLabel}>Room</div>
+            <div className={styles.headerDays}>
+              {Array.from({ length: TOTAL_DAYS }, (_, dayIndex) => (
+                <div
+                  key={dayIndex}
+                  className={styles.headerDay}
+                  style={{
+                    width: COLUMN_WIDTH_PX,
+                    minWidth: COLUMN_WIDTH_PX,
+                  }}
+                >
+                  {dayLabels[dayIndex]}
+                </div>
+              ))}
+            </div>
+          </div>
 
-      {/* Scrollable grid body */}
-      <div
-        className={styles.body}
-        onScroll={handleScroll}
-      >
-        <div style={{ minWidth: TOTAL_DAYS * COLUMN_WIDTH_PX + LABEL_COLUMN_WIDTH_PX }}>
+          {/* 房型行 */}
           {roomUnits.map(room => (
             <RoomRow
               key={room.id}

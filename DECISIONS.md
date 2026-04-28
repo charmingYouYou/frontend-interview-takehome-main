@@ -14,7 +14,7 @@
 12. 异步态渲染缺乏统一基础设施，loading / error / empty 三态各自为政：(1) `pages/index` 在页头用 `<span>Loading...</span>` 表达加载态、网格区用 `<div>Loading bookings.../No bookings found.</div>` 三元混写表达 loading 与 empty，两处文案各写一遍；(2) `BookingDrawer` 的附加详情区以 `isLoading && <span>loading...</span>` + `detail ? <Rows> : !isLoading ? <empty> : null` 三层条件嵌套表达三态，控制流跳跃且新增分支极易遗漏；(3) `pages/messages` 与 `Sidebar` 在 loading / error 路径上完全静默渲染空列表，对用户没有任何反馈；(4) **错误态在视图层全局缺位** —— 没有任何组件消费 SWR 的 `error` 字段，4xx/5xx / 网络异常一旦发生只能在控制台看到 `httpGet` 抛出，UI 表现为"永远加载中"或"永远空数据"；(5) 没有 React 错误边界，渲染期任意一处抛错（例如下游组件 props 解构失败）即整树白屏。整体表现为"loading 文案是装饰品而不是契约、error 是缺席状态、empty 与 loading 视觉与文案到处复制"。
 13. `BookingGrid` 内 `roomUnits.map` 渲染时以 `bookings.filter(b => b.roomUnit.roomId === room.id)` 内联派发每行的预订子集，存在两类工程问题：(1) `roomBookings` 数组在每次父组件渲染时都被重新构造，引用跨帧不稳定 —— 即便 `RoomRow` 后续接入 `React.memo`，`bookings` prop 的浅比较也会因新引用被全部命中、跳过失效；(2) 单次渲染对 `bookings` 全集做 N 次 O(M) 线性扫描（N = 房型数、M = 预订总数），整体 O(N×M) 开销在网格滚动等高频重渲染路径下被放大。需要在 `BookingGrid` 内一次性 `useMemo` 按 `roomId` 分桶为 `Map<string, Booking[]>`，消费侧改用 `Map.get` 拿到引用稳定的子集，将复杂度收敛为单次 O(M) 分桶 + O(1) 命中。
 14. `RoomRow` 的日格 hover 视觉态以 React state（`hoveredCell`）+ 单元格 `onMouseEnter` / `onMouseLeave` 实现，存在两类工程问题：(1) hover 本质是纯视觉态、无业务副作用，却被强行接入 React 渲染链路 —— 鼠标每次进出格子都会触发 `BookingGrid` `setState` → 全部 `RoomRow` 重渲染，含每行的所有日格与预订条，与"hover 只该影响一格视觉"的语义严重错配；(2) 日格背景层仅依赖 `visibleRange × columnWidthPx` 几何参数，与 `bookings` 数据完全正交，但当前实现下 SWR 数据刷新会同时触发日格层与 booking bar 层重渲染，未做关注点分离。需要 (a) 把 `.row:hover` / `.cell:hover` 下沉到 CSS Module 伪类承载，删除 `hoveredCell` JS state 与配套 props 链路；(b) 把日格背景拆为独立的 `<DayCells>` 子组件并 `React.memo`，依赖项仅为几何参数，与 booking bar 渲染解耦；(c) `RoomRow` 自身接入 `React.memo`，与第 13 点的 props 引用稳定化形成完整的"分桶 → 子集稳定 → memo 命中 → 子组件分层"重渲染抑制链路。
-15. BookingGrid首行首列应该sticky
+15. `BookingGrid` 缺少首行（表头日期列）/ 首列（房型标签列）sticky 滚动行为，存在多类工程问题：(1) 当前布局把 `.header` 与 `.body` 拆为 `.root` 下的两个 flex 兄弟节点，`.body` 自带 `overflow: auto` 独立横滚，`.headerDays` 又显式 `overflow: hidden` —— 横滚时表头日期列与下方日格列彻底失去对应关系，用户无法读出当前列归属哪一天；(2) 纵滚时表头停留在视口顶部（因不在 `.body` 内），但行标签列（房型名）随 body 一起滚出，超过视口的房型用户无法定位当前行属于哪个房型，需反复回滚识别；(3) 现有"双 scroll container 隔离 + 表头窗口式渲染"近似模拟表头吸附，本质是布局层缺位、用 JS 状态绕行 —— 一旦未来需要 scrollLeft 同步必然要再加一层 `useEffect` 监听粘合，是典型的"用 JS 修补 CSS 应该提供的能力"反模式；(4) 表头 `.headerDays` 仅渲染 `[visibleStartIndex, visibleEndIndex]` 窗口，而 body 行的日格层经第 14 条改造后已是全量渲染，二者渲染范围口径错位 —— 即便临时同步 scrollLeft 也无法解决"表头视图不完整"的语义问题，未来扩展（时间轴标尺、节假日跨视口高亮、日期粘连提示）都会因表头缺失被卡住。
 16. BookingGrid缺少a11y
 17. 缺少单测和E2E
 
@@ -125,6 +125,17 @@
     - **副产物清理**：移除调试遗留 `console.log("render", rowId)` 与不再使用的 `clsx` 依赖；`HoveredCell` 类型不再导出；`BookingGrid.tsx` 头注释同步更新"状态归属"段（不再持有任何 hover 相关 React 状态）。第 3 条原本下沉到 `BookingGrid` 本地的 `hoveredCell` state 至此被进一步消除，回归"无状态网格 + CSS 伪类"的最简形态。
     - **效果**：(a) 鼠标在网格内悬停操作不再产生任何 React 渲染；(b) SWR `bookings` 刷新时仅 booking bar 层重渲染，日格背景层稳定不动；(c) 与第 13 条共同形成完整的"分桶 → 子集稳定 → memo 命中 → 子组件分层"重渲染抑制链路，为后续问题 15（sticky）/ 16（a11y）改造留出干净的渲染基线。
     - **覆盖清单**：改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/RoomRow.tsx` / `components/BookingGrid/RoomRow.module.css` 共 3 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
+15. 按 **「单一滚动容器 + position: sticky 双向吸附 + 渲染口径统一」** 原则重构 `BookingGrid` 的滚动 / 表头模型，把首行 / 首列吸附从"双 container 手动同步"反模式还原为浏览器原生 CSS 行为：
+    - **单一滚动容器**：把 `.header` 从 `.root` 的 flex 兄弟节点下沉到 `.body` 内层 wrapper（与全部 RoomRow 同级），`.body` 成为整个网格的唯一滚动事件源；删除 `.headerDays` 上的 `overflow: hidden` 与 `useVisibleRange` 在表头的窗口截断分支，原"双 scroll container + 隐式 scrollLeft 同步"的脆弱契约彻底消失，未来无须任何 JS 监听粘合两个滚动条。
+    - **首行 sticky-top**：`.header` 设 `position: sticky; top: 0; z-index: 3`，纵滚时持续贴附 `.body` 视口顶部；背景显式设为不透明 `var(--color-bg-elevated)`，避免 body 内容滑过表头时透出。
+    - **首列 sticky-left**：`.headerLabel` 与 `RoomRow .label` 设 `position: sticky; left: 0`，横滚时贴附 `.body` 视口左侧；同样以不透明背景 (`--color-bg-booking-header` / `--color-bg-base`) 防止下层内容穿透。
+    - **角落格双向吸附**：`.headerLabel` 同时叠加 `sticky-top`（继承自父级 `.header`）+ `sticky-left`，构成"角落始终可见"的二维吸附行为；通过 `.headerLabel` 在 `.header` 内 z-index = 1 + 父级 `.header` 在 body 内 z-index = 3 的层级组合，确保两轴同时滚动时角落格永远盖在十字交叉点最上层。
+    - **二维 z-index 层级**（`.body` 滚动上下文内）：4（角落 `.headerLabel` 的全局等效层级）> 3（表头 `.header`）> 2（行标签 `.label`）> 1（预订条 `.bar`）> 0（日格 `.cell`）—— 形成清晰的"角落 → 表头 → 标签列 → 数据条 → 几何格"覆盖栈。其中 `.bar` z-index 由 2 降为 1 以让位给 sticky-left 标签列，避免横滚时预订条从左侧穿透到房型名上方造成视觉错位。
+    - **表头全量渲染口径统一**：`.headerDays` 不再消费 `visibleRange.startIndex / endIndex`，改为 `Array.from({ length: TOTAL_DAYS })` 渲染全部 30 个日期标签，与第 14 条 DayCells 的全量策略对齐 —— 横滚时表头日期与下方日格以 flex 等宽栅格自然对齐，列对应关系在任意 scrollLeft 都精确成立，扩展时间轴标尺 / 节假日跨视口高亮等场景的语义基础也随之具备。
+    - **`useVisibleRange` 角色收窄**：仅供 `BookingBars` 数据层做窗口过滤，不再驱动表头视图渲染；表头与该 hook 解耦，减少了一处隐式耦合点，hook 的职责回归"viewport scroll → visibleIndex"单一映射。
+    - **a11y 前置**：sticky 改造保留了语义结构（表头依然在 DOM 树前部、行内首列依然是房型标签），为后续 issue 16 引入 `<table>` / `role="grid"` 的 ARIA 语义改造留出干净基线，不会被 sticky 实现细节绑死。
+    - **效果**：(a) 横滚时表头日期与下方日格全程列对位，用户读图无须再回拉对应；(b) 纵滚时房型名贴左固定，行归属一目了然；(c) 网格滚动逻辑回归浏览器原生 CSS 行为，不再依赖任何 JS 状态同步；(d) 与第 13 / 14 条共同形成"分桶 → memo → 子组件分层 → sticky 吸附"的完整渲染基线，为问题 16（a11y）/ 17（单测 / E2E）改造留出干净的可观测起点。
+    - **覆盖清单**：改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/BookingGrid.module.css` / `components/BookingGrid/RoomRow.module.css` 共 3 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
 
 ## 权衡取舍
 
