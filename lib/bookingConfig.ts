@@ -36,14 +36,15 @@ export const BOOKING_CONFIG: BookingConfig = {
   DATE_RANGE_END: addDays(DATE_RANGE_START, TOTAL_DAYS),
   COLUMN_WIDTH_PX: 48,
   LABEL_COLUMN_WIDTH_PX: 140,
-  // 行视觉占位高度（"行 stride"，下一行起点相对当前行起点的 y 偏移）：
-  //   = token --size-row-height (40, 内容高) + .row border-bottom (1px) = 41。
-  // 不要与 --size-row-height 直接对齐：后者是 .label / .timeline / .cell 的内容
-  // 区高度，行整体因 border-bottom 还要再占 1px。GridBookingBars 通过
-  // top = rowIndex × ROW_HEIGHT_PX 计算 bar 纵向位置，若误用 40 会每跨一行
-  // 累积漂移（rowIndex=25 处实测 -19px，bar 越往下越上抬到上一行）。
-  // 若未来 .row 的分隔线方案变化（例如改用 box-shadow 或独立网格层），需同步
-  // 调整本值；为减少漂移再现风险，可考虑迁移到 ResizeObserver 实测行 stride。
+  // 行视觉占位高度（"行 stride"，下一行起点相对当前行起点的 y 偏移）的
+  // SSR / 首帧 fallback。运行时由 hooks/useRowStride 在 BookingGrid 首行
+  // RoomRow 上挂 ResizeObserver 实测 offsetHeight 覆盖本值，CSS 行高方案
+  // （token 高度、border 切换、行内 padding 调整）变化时自动跟随，不再
+  // 依赖此处常量与 CSS 维持一致。
+  //
+  // 当前 fallback 取值 41 = token --size-row-height (40, 内容高) +
+  // .row border-bottom (1px)；与 CSS 实际值一致时首帧 bar 与挂载后零漂移，
+  // 即便不一致最多漂 1 帧（mount 同步路径）即被实测值纠正。
   ROW_HEIGHT_PX: 41,
   // 必须与 styles/tokens.css 中 --size-bar-offset-top 保持一致：
   // bar 在行内的顶部偏移由 GridBookingBars 累加进 inline top，无法

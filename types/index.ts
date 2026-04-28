@@ -73,10 +73,11 @@ export interface BookingConfig {
   COLUMN_WIDTH_PX: number
   LABEL_COLUMN_WIDTH_PX: number
   /**
-   * 行视觉占位高度（"行 stride"），= 内容高度 + 行底部分隔线宽度。供
-   * GridBookingBars 通过 rowIndex × ROW_HEIGHT_PX 计算每条 bar 的 top，
-   * 必须为完整 stride 而非 token --size-row-height 的内容高（详见
-   * bookingConfig 注释，少 1px 会跨行累积漂移）。
+   * 行视觉占位高度（"行 stride"）的 SSR / 首帧 fallback。
+   *
+   * 运行时由 hooks/useRowStride 在 BookingGrid 首行 RoomRow 上挂
+   * ResizeObserver 实测 offsetHeight 覆盖本值，CSS 行高方案变化时自动
+   * 跟随，不再要求 JS 与 CSS 维持一致。详见 lib/bookingConfig.ts 注释。
    */
   ROW_HEIGHT_PX: number
   /**

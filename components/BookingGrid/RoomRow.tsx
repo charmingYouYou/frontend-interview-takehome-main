@@ -1,4 +1,4 @@
-import React, { memo } from "react";
+import React, { forwardRef, memo } from "react";
 import styles from "./RoomRow.module.css";
 
 interface RoomRowProps {
@@ -57,31 +57,35 @@ const DayCells = memo(function DayCells({
  *   - 本组件不再持有 bookings / visibleRange / onBookingClick，仅依赖
  *     rowName / totalDays / columnWidthPx 三个跨帧稳定的输入；
  *   - 预订条 bar 的渲染整体上移到 BookingGrid 层的 GridBookingBars，
- *     使用 rowIndex × ROW_HEIGHT_PX 在二维坐标系中绝对定位；
+ *     使用 rowIndex × rowStride 在二维坐标系中绝对定位（rowStride 由
+ *     BookingGrid 通过 useRowStride 实测本组件根节点的 offsetHeight
+ *     得到，CSS 行高方案变化时自动跟随，不再依赖 JS 端硬编码常量）；
  *   - 横滚时滚动容器只触发顶层组件 + GridBookingBars 重渲染，
  *     RoomRow 的 props 始终引用稳定，配合 React.memo 浅比较直接跳过，
  *     N 行函数体执行 → 0。
+ * forwardRef：根 div 通过 forwardRef 暴露给父级，使 BookingGrid 能在
+ *          首行（i === 0）上挂 ResizeObserver 实测行 stride，作为
+ *          GridBookingBars 几何计算的真理来源。React.memo 不会把 ref
+ *          视作 props，浅比较行为不受影响。
  * Hover 表达：行 / 日格 hover 视觉态全部由 CSS `:hover` 伪类承载，无
  *          JS 状态、无父组件 setState、无渲染链路开销。
  * 视觉规格：所有静态样式（颜色 / 间距 / 尺寸 / 圆角 / 动效）来自
  *          RoomRow.module.css + tokens.css；仅日格 left/width 几何值
  *          以 inline style 注入。
  */
-export function RoomRowImpl({
-  rowName,
-  totalDays,
-  columnWidthPx,
-}: RoomRowProps) {
-  return (
-    <div className={styles.row}>
-      <div className={styles.label}>{rowName}</div>
+export const RoomRowImpl = forwardRef<HTMLDivElement, RoomRowProps>(
+  function RoomRowImpl({ rowName, totalDays, columnWidthPx }, ref) {
+    return (
+      <div ref={ref} className={styles.row}>
+        <div className={styles.label}>{rowName}</div>
 
-      <div className={styles.timeline}>
-        {/* 几何层：全量日格背景，永不重渲染 */}
-        <DayCells totalDays={totalDays} columnWidthPx={columnWidthPx} />
+        <div className={styles.timeline}>
+          {/* 几何层：全量日格背景，永不重渲染 */}
+          <DayCells totalDays={totalDays} columnWidthPx={columnWidthPx} />
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  },
+);
 
 export const RoomRow = memo(RoomRowImpl);
