@@ -46,6 +46,11 @@ export const BOOKING_CONFIG: BookingConfig = {
   // .row border-bottom (1px)；与 CSS 实际值一致时首帧 bar 与挂载后零漂移，
   // 即便不一致最多漂 1 帧（mount 同步路径）即被实测值纠正。
   ROW_HEIGHT_PX: 41,
+  // 单条 lane（泳道）内容高度，必须与 styles/tokens.css 的
+  // --size-row-height 保持一致。多 lane 改造后行内可堆叠多条 bar，
+  // 每条 lane 占据本值高度；rowTopByRoomId 与 RoomRow 行高均按
+  // `laneCount × LANE_HEIGHT_PX` 派生。
+  LANE_HEIGHT_PX: 40,
   // 必须与 styles/tokens.css 中 --size-bar-offset-top 保持一致：
   // bar 在行内的顶部偏移由 GridBookingBars 累加进 inline top，无法
   // 通过容器 padding-top 实现（absolute 子元素 top:0 参照 padding box）。

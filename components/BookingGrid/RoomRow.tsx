@@ -7,6 +7,17 @@ interface RoomRowProps {
   totalDays: number;
   /** 单日列宽（px），由父级 BookingGrid 从 BOOKING_CONFIG 透传，避免子组件直读单例。 */
   columnWidthPx: number;
+  /**
+   * 该 room 行的 lane（泳道）数 —— 多 lane 改造下行高动态展开。
+   * 由 BookingGrid 通过 lib/laneAssignment.assignLanes 预先分配后透传，
+   * 跨帧稳定（仅 bookings 数据变化时重算），React.memo 浅比较仍命中。
+   */
+  laneCount: number;
+  /**
+   * 单 lane 内容高度（px），= LANE_HEIGHT_PX。配合 laneCount 撑出本行
+   * 总高度 `laneCount × laneHeightPx`，覆盖 CSS token 默认的单 lane 高度。
+   */
+  laneHeightPx: number;
 }
 
 interface DayCellsProps {
@@ -74,12 +85,24 @@ const DayCells = memo(function DayCells({
  *          以 inline style 注入。
  */
 export const RoomRowImpl = forwardRef<HTMLDivElement, RoomRowProps>(
-  function RoomRowImpl({ rowName, totalDays, columnWidthPx }, ref) {
+  function RoomRowImpl(
+    { rowName, totalDays, columnWidthPx, laneCount, laneHeightPx },
+    ref,
+  ) {
+    // 多 lane 行高：用 inline style 覆盖 CSS token 默认的 var(--size-row-height)
+    // 高度。CSS 仍持有单 lane 的默认值供 SSR / fallback；当 laneCount > 1 时
+    // 由本 inline style 拉伸。.label 与 .timeline 共用同一高度以维持上下对齐。
+    const rowContentHeight = laneCount * laneHeightPx;
     return (
       <div ref={ref} className={styles.row}>
-        <div className={styles.label}>{rowName}</div>
+        <div className={styles.label} style={{ height: rowContentHeight }}>
+          {rowName}
+        </div>
 
-        <div className={styles.timeline}>
+        <div
+          className={styles.timeline}
+          style={{ height: rowContentHeight }}
+        >
           {/* 几何层：全量日格背景，永不重渲染 */}
           <DayCells totalDays={totalDays} columnWidthPx={columnWidthPx} />
         </div>

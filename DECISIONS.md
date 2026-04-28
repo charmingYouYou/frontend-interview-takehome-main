@@ -9,6 +9,10 @@
 
 2. `getStatusPillClass` 枚举不完备：`if/else` 仅覆盖两态、入参 `status: string` 弱类型，新增枚举成员编译器无法静态强制覆盖，五态在 UI 层只表达三态。
 
+3. bar `width` 与 `left` clamp 不一致：`x = LABEL + max(0, startDay × COL)` 把负 `startDay`（如 b1 `checkIn = -2`）的视觉左缘钳到 timeline 起点，但 `width = (endDay - startDay + 1) × COL` 仍按真实负 startDay 计算 —— 被钳掉的 `|startDay|` 列以"右缘多出宽度"形式溢出（b1 endDay=5/1 实际渲染到 5/3）。
+
+4. 同 room 重叠 booking 的 bar 几何相互覆盖：`mockData` 生成器（`room = i%20+8`、`checkIn = i%7`）在 i 与 i+20 配对时高概率制造同房型时间区间重叠（如 b27/b47 同处 room-24、共享 day 2-4），单 lane 渲染下后绘 bar 完全遮住先绘 bar，整条数据在视图上消失。
+
 ### B. 架构与状态归属
 
 1. `_app.tsx` 顶层 Provider 抽象越界：`AppContext` 把 `BookingGrid` 子树态提到根、卷入无关路由；`MessagesContext` 与 URL query 形成双真理来源；`unreadCount` 反向回写 Context 是 SWR 派生量，链路脆弱。
@@ -59,6 +63,10 @@
 
 2. **枚举完备性查表强制**：签名收紧 `status: BookingStatus`；新增 `STATUS_PILL_CLASSES: Record<BookingStatus, string>` TS 静态强制覆盖所有成员；`getStatusPillClass` 退化为单行查表；同步补齐 3 对 pill token 与 module 类，五态视觉对齐。
 
+3. **width 同步用 clamp 后的起点**：`width = (endDay - max(0, startDay) + 1) × COL`，与 `x` 的 clamp 行为对齐 —— 负 startDay 被钳掉的列同时从宽度中扣除，bar 右缘恢复锚定真实 endDay；完全在可视范围内的 bar（`startDay ≥ 0`）公式退化为原版，行为不变。
+
+4. **同 room 重叠区间贪心着色 + 行高自适应**：新增 `lib/laneAssignment.assignLanes`，对每个 roomId 按 `(startDay, endDay)` 升序、贪心扫描 `lanes[i] < startDay` 找最早可复用 lane（O(N log N)/room），输出 `laneByBookingId` + `laneCountByRoomId`；`BookingGrid` useMemo 累积 `rowTopByRoomId = Σ (laneCount × LANE_HEIGHT_PX + 1px border)` 取代旧版"等宽行 × rowIndex"的 stride 假设；`RoomRow` 接 `laneCount/laneHeightPx`，inline 设置 `.label/.timeline` 高度为 `laneCount × LANE_HEIGHT_PX`、`.cell` 高度改 `100%` 跟随多 lane 行延伸；`GridBookingBars` bar 的 `top = rowTop + lane × LANE_HEIGHT_PX + BAR_OFFSET_TOP_PX`，重叠区间错开堆叠不再相互覆盖。验证：room-1/22/28（无 overlap）单 lane 41px、room-23/24（含 overlap）双 lane 81px，b27/b47 在 room-24 内分到 lane 0/1 全部可见。
+
 ### B. 架构与状态归属
 
 1. **状态归属最小化**拆 Context：静态 config 抽 `BOOKING_CONFIG` 模块常量；`hoveredCell` 下沉 `BookingGrid` 本地；路由态 `useRouter().query` 派生；`unreadCount` 改 `Sidebar` 直接 `useSWR` 同 key 共享；新增 `POST /api/tickets/:id/read` + `mutate optimisticData / rollbackOnError` 闭环已读态。删除 `context/` 整目录。
@@ -93,7 +101,7 @@
 
 4. **BookingBars 提升到 grid 层**：新增 `<GridBookingBars>` 一次遍历全集 + `roomId → rowIndex` 索引、二维坐标定位、`clippedStart` 实现 sticky-left；`RoomRow` 收为 3 props 纯几何骨架，横滚下函数体执行 0 次；`BOOKING_CONFIG` 新增 `ROW_HEIGHT_PX:41`（含 1px 分隔线）/ `BAR_OFFSET_TOP_PX:6` 解决 stride 漂移。
 
-5. **transform: translate3d 走 GPU 合成层**：bar 几何 `left / top` → `transform`，配 `will-change: transform` 稳定开层；`.bar` 默认位锁 `(0,0)` 防 absolute 回退叠加；滚动改写仅触发 compositor，跳过 layout 与 paint。
+5. **bar 用 `left/top` + 文字 `position:sticky` 横滚 sticky-left**：原计划用 `transform: translate3d` 走 GPU 合成层，但实测父级 `transform` 会破坏内部 `position:sticky` 的 scrollport 参照（sticky 把被 transform 的 `.bar` 自身当作 scrollport，文字粘在固定偏移、不再跟随真实 `scrollLeft`）；改回 inline `left/top`（坐标不依赖 scrollLeft，React 浅比对不写 DOM，滚动由滚动容器整体合成）。`.bar` 用 `clip-path: inset(0 round var(--radius-sm))` 替代 `overflow:hidden` 做内容裁剪 —— `overflow:hidden` 会让 `.bar` 成为 scrolling container 同样阻断 sticky；clip-path 仅做视觉裁剪不建立 scroll container。`.barLabel` 子元素用 `position: sticky; left: calc(var(--size-row-label-width) + var(--spacing-2))` 钉在 sticky `.label` 列右缘的 viewport 位置，bar 跨可视左缘时 guestName 自动贴可视左边可见、bar 完全滚出时受 .barLabel 父级 content-box 右界约束随 bar 退出，全程逐像素平滑（无需依赖 `useVisibleRange` 的 stepwise 阈值化）。
 
 6. **`useVisibleRange` 阈值化 setState**：state 由 `scrollLeft` 改 `startIndex`，函数式 setter 比较新旧值实现同列短路；输出收窄为拍平的 `{ startIndex, endIndex, handleScroll }`，删除无消费者的 `offsetPx` / `scrollLeft`。
 
@@ -102,9 +110,9 @@
 
 <!-- 你有意识地没有做什么，为什么？ -->
 
-1. **未引入虚拟滚动**：当前网格规模为 30 列 × 31 行 ≈ 930 cell + 数十条 bar，配合"几何层 memo 永不重渲染 + bar 提升至 grid 层 + transform 合成层"已无可见瓶颈；虚拟化会引入滚动惯性 / sticky 边界 / 焦点跳跃等额外复杂度，性能 budget 报警再做。
+1. **未引入虚拟滚动**：当前网格规模为 30 列 × 31 行 ≈ 930 cell + 数十条 bar，配合"几何层 memo 永不重渲染 + bar 提升至 grid 层 + bar 坐标不依赖 scrollLeft（不触发 reconcile）+ 滚动容器整体合成"已无可见瓶颈；虚拟化会引入滚动惯性 / sticky 边界 / 焦点跳跃等额外复杂度，性能 budget 报警再做。
 
-2. **未对脏数据做前端兜底**：同 room 同窗口出现重叠预订的处理（截断 / 错层 / 上报），属业务降级策略，需产品方明确口径再实现。
+2. **重叠预订只做错层不做 cap / 折叠**：同 room 重叠区间已用 lane 贪心着色错层堆叠（详见 A.4 修复），但未设 `MAX_LANES` 上限与"+N more"折叠徽标 —— 极端 overlap（如同一 room 10+ 重叠）会让单行高度失控；产品对"几条以内全展开 / 几条以上折叠"的口径未明，先保留全展开避免数据被遮蔽，待业务规则收敛再加 cap。同时 lane 改造放弃了 `useRowStride` 的 ResizeObserver-CSS-token 跟随能力（`LANE_HEIGHT_PX` 退回 JS 常量与 `--size-row-height` 手工保持一致），如需恢复"CSS as truth"可后续加 `useLaneHeight` 通过 `getComputedStyle` 读 CSS var。
 
 3. **未做敏感字段脱敏**：手机 / 邮箱 / 金额是否模糊及触发条件需产品 + 合规明确，前端不擅自决定。
 

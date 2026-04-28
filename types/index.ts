@@ -75,11 +75,18 @@ export interface BookingConfig {
   /**
    * 行视觉占位高度（"行 stride"）的 SSR / 首帧 fallback。
    *
-   * 运行时由 hooks/useRowStride 在 BookingGrid 首行 RoomRow 上挂
-   * ResizeObserver 实测 offsetHeight 覆盖本值，CSS 行高方案变化时自动
-   * 跟随，不再要求 JS 与 CSS 维持一致。详见 lib/bookingConfig.ts 注释。
+   * 多 lane 改造后，每个 RoomRow 的实际 stride = laneCount × LANE_HEIGHT_PX
+   * + .row border-bottom，由 BookingGrid 在 useMemo 内累积 rowTopByRoomId；
+   * 本字段仅作为单 lane 行的 SSR fallback 与历史兼容值保留。
    */
   ROW_HEIGHT_PX: number
+  /**
+   * 单条 lane（泳道）的内容高度（px），与 styles/tokens.css 的
+   * --size-row-height 保持一致。多 lane 行的视觉高度 = laneCount ×
+   * LANE_HEIGHT_PX，bar 在行内的纵向坐标按 lane 索引乘以本值递推：
+   * `top = rowTop + laneIndex × LANE_HEIGHT_PX + BAR_OFFSET_TOP_PX`。
+   */
+  LANE_HEIGHT_PX: number
   /**
    * 预订条 bar 在行内的纵向偏移（px），与 token --size-bar-offset-top 对齐。
    * 由 GridBookingBars 在 inline top 内累加（top = rowIndex × ROW_HEIGHT_PX

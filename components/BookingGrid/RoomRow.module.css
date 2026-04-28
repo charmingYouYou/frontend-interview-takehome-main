@@ -62,7 +62,9 @@
  * 拆分后可在数据刷新场景下完全跳过重渲染。 */
 .cell {
   position: absolute;
-  height: var(--size-row-height);
+  /* height:100% 跟随 .timeline 的 inline 高度（laneCount × LANE_HEIGHT_PX）
+   * 自适应，多 lane 行下日格背景可延伸覆盖全部 lane，避免下半格穿底。 */
+  height: 100%;
   border-right: 1px solid var(--color-border-subtle);
   cursor: default;
   transition: background var(--motion-duration-fast)
@@ -77,17 +79,24 @@
  * 在日格分隔线之上），低于 .label 的 sticky-left 层级（横滚时不穿透到
  * 标签列）。
  *
- * 几何驱动改造：bar 的 (x, y) 位置由 GridBookingBars 通过 inline
- * `transform: translate3d(x, y, 0)` 注入，不再使用 inline left/top。
- * 这里显式把 top/left 锁为 0、使 transform 在 (0,0) 起点上做平移，
- * 避免 inline transform 与不确定的 left/top 默认值（auto）叠加；
- * 同时声明 `will-change: transform` 让浏览器为每条 bar 建立独立
- * 合成层，横滚时位置变化只触发 compositor 平移、不再走 layout / paint，
- * 滚动期间的开销从"重排所有 bar"收敛为"GPU 合成层重新摆位"。 */
+ * 定位策略：bar 的 (x, y) 由 GridBookingBars 以 inline `left / top`
+ * 注入。曾尝试用 `transform: translate3d(x, y, 0)` + `will-change:
+ * transform` 走合成层，但父级 transform 会让内部 .barLabel 的
+ * position:sticky 失去对真正滚动容器（.body）的参照（实测 sticky 会以
+ * 被 transform 的 .bar 自身为 scrollport，文字粘在 bar 内固定 140px
+ * 偏移、不再跟随 scrollLeft）。改回 left/top 后 sticky 链路恢复正常；
+ * 性能上 x/y 不随滚动变化，无 layout 抖动。
+ *
+ * 内容裁剪 clip-path 而非 overflow:hidden：.bar 内嵌 .barLabel 用
+ * position:sticky 让 guestName 横滚中贴可视左缘可见，sticky 需要以
+ * 真正的滚动容器（.body）为参照系。但 `overflow:hidden` 会让浏览器
+ * 把 .bar 视为 scrolling container（即便不可滚），sticky 子元素会因此
+ * 把 .bar 当成 scrollport，导致 sticky 永不触发。clip-path 仅做视觉
+ * 裁剪、不建立 scrolling container，等价地把溢出 bar 边界的文字裁掉，
+ * 同时不破坏 sticky 的滚动参照链。`inset(0 round var(--radius-sm))`
+ * 保留 bar 的圆角，与 overflow:hidden + border-radius 视觉一致。 */
 .bar {
   position: absolute;
-  top: 0;
-  left: 0;
   height: var(--size-bar-height);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -96,8 +105,28 @@
   padding-left: var(--spacing-2);
   font-size: var(--font-size-xs);
   color: var(--color-text-on-status);
-  overflow: hidden;
+  clip-path: inset(0 round var(--radius-sm));
   white-space: nowrap;
   z-index: 1;
-  will-change: transform;
+}
+
+/* bar 内部文字 sticky 层：纯 CSS 驱动 guestName 在横滚中贴 sticky label
+ * 列右缘可见，直至所属 .bar 完全滚出视口。
+ *
+ * 原理：position:sticky 以最近的 scrolling ancestor（.body）为 scrollport，
+ *      `left: var(--size-row-label-width)` 把吸附阈值设在 sticky .label 列
+ *      右缘 —— 当 .barLabel 自身的 viewport-x 被滚到该阈值左侧时启动
+ *      sticky，文字钉在阈值位置；移动上下界由 .barLabel 父级（.bar）的
+ *      content box 限定 —— bar 整体右移到阈值之右时 sticky 失活、文字
+ *      回到 bar 内左侧自然位置；bar 整体滚至阈值左侧消失时 sticky 受
+ *      右界约束随 bar 退出。
+ * 与 JS 平移方案的差异：sticky 跟随真实 scrollLeft 的逐像素值，不依赖
+ *      useVisibleRange 的 stepwise dayIndex 阈值化输出，文字位移在滚动
+ *      中是像素级平滑而非按列瞬跳。
+ * 前置约束：.bar 不能建立 scrolling container（不能 overflow:hidden /
+ *      auto / scroll），否则 sticky 会以 .bar 而非 .body 为 scrollport，
+ *      永不触发。.bar 的视觉裁剪因此采用 clip-path（见上方 .bar 规则）。 */
+.barLabel {
+  position: sticky;
+  left: calc(var(--size-row-label-width) + var(--spacing-2));
 }

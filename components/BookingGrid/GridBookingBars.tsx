@@ -1,5 +1,5 @@
 import React, { memo, useMemo } from "react";
-import { Booking, RoomUnit } from "@/types";
+import { Booking } from "@/types";
 import { STATUS_COLOR_VARS, STATUS_FALLBACK_COLOR } from "@/lib/bookingStatus";
 import { diffDays } from "@/lib/date";
 import styles from "./RoomRow.module.css";
@@ -7,17 +7,27 @@ import styles from "./RoomRow.module.css";
 interface GridBookingBarsProps {
   /** 全集 bookings；GridBookingBars 在 grid 层一次性渲染所有 bar，避免按行散落。 */
   bookings: Booking[];
-  /** 房型有序列表，用于建立 roomId → rowIndex 的映射，决定每条 bar 的 top。 */
-  roomUnits: RoomUnit[];
-  /** 可视窗口起始 dayIndex；bar 与之相交时左缘吸附实现"sticky-left"视觉。 */
+  /** 可视窗口起始 dayIndex；用于数据层窗口过滤（剔除完全在窗口左侧之外的 bar）。 */
   visibleStartIndex: number;
   /** 可视窗口结束 dayIndex（含），用于数据层窗口过滤。 */
   visibleEndIndex: number;
   /** 单日列宽（px）。 */
   columnWidthPx: number;
-  /** 单行行高（px），用于 bar 的 top 计算。 */
-  rowHeightPx: number;
-  /** bar 在行内的纵向偏移（px），需累加进 inline top。 */
+  /**
+   * roomId → 该 room 行顶边相对 .barsLayer 顶部的 y 偏移（px）。
+   * 由父级累积每行 `laneCount × LANE_HEIGHT_PX + 1px border` 得到，
+   * 取代旧版"rowIndex × rowHeightPx"的等宽行假设，支持多 lane 动态行高。
+   */
+  rowTopByRoomId: Map<string, number>;
+  /**
+   * bookingId → 该 booking 在所属 room 行内的 lane 索引（0-based）。
+   * 由 lib/laneAssignment.assignLanes 预分配，bar 的 y 在 rowTop 基础上
+   * 累加 `laneIndex × laneHeightPx`，让重叠区间彼此错开堆叠不互相覆盖。
+   */
+  laneByBookingId: Map<string, number>;
+  /** 单条 lane 内容高度（px），= LANE_HEIGHT_PX。 */
+  laneHeightPx: number;
+  /** bar 在 lane 内的纵向偏移（px），需累加进 inline top。 */
   barOffsetTopPx: number;
   /** 左侧房型标签列宽（px）；bar 层覆盖整行（含 label 区），left 需加此偏移。 */
   labelColumnWidthPx: number;
@@ -38,15 +48,28 @@ interface GridBookingBarsProps {
  *        - GridBookingBars 单点承接窗口变化，整网格滚动只剩本组件
  *          重渲染。
  * 几何模型：本层与 RoomRow 兄弟节点共处于 .rowsLayer（position:relative）
- *      内的 .barsLayer（position:absolute, inset:0, padding-top 抵消 bar
- *      的 offset）；坐标系跨整个网格主体，bar 的：
- *        - top = rowIndex × rowHeightPx
- *        - left = LABEL_COLUMN_WIDTH_PX + clippedStart × columnWidthPx
- *          （留出 sticky label 列宽度）
- *        - width = (endDay - clippedStart + 1) × columnWidthPx
- *      其中 `clippedStart = max(startDay, visibleStartIndex)` —— bar 跨过
- *      可视窗左缘时左缘吸附到 visibleStartIndex 处，guestName 横滚中持续
- *      贴可视窗左边可见，右缘锚定真实 endDay 由滚动容器自然裁剪。
+ *      内的 .barsLayer（position:absolute, inset:0）；坐标系跨整个网格
+ *      主体，bar 的：
+ *        - top = rowTopByRoomId[roomId] + laneIndex × LANE_HEIGHT_PX
+ *                + BAR_OFFSET_TOP_PX
+ *          （rowTop 由 BookingGrid 累积每行 `laneCount × LANE_HEIGHT_PX
+ *          + 1px border` 得到，laneIndex 由 lib/laneAssignment 区间贪心
+ *          着色派生 —— 同房型重叠区间被分到独立 lane 错开堆叠）
+ *        - left = LABEL_COLUMN_WIDTH_PX + max(0, startDay) × columnWidthPx
+ *          （startDay 为负的 bar 视觉左缘 clamp 到 timeline 起点）
+ *        - width = (endDay - max(0, startDay) + 1) × columnWidthPx
+ *      bar 始终保持其 lane 内的真实区间几何，越过可视窗左缘的部分由滚动
+ *      容器自然裁剪。
+ * 文字 sticky：guestName 包在 .barLabel 子元素内，由 CSS `position: sticky;
+ *      left: var(--size-row-label-width)` 驱动 —— 滚动容器 .body 是其
+ *      scrollport，文字被钉在 sticky label 列右缘的 viewport 位置。bar 跨
+ *      可视窗左缘时文字自动贴在视口左边可见；右界天然受 .barLabel 父级
+ *      content box（即 .bar 自身）约束，bar 完全滚出时文字随之退出。
+ *      此方案纯 CSS、跟随真实 scrollLeft 的像素，不依赖 visibleStartIndex
+ *      stepwise 阈值化，文字位移在滚动中逐像素平滑。
+ *      前置约束：.bar 必须不建立 scrolling container（否则 sticky 会以
+ *      .bar 自身为参照、永不触发）—— .bar 的内容裁剪因此改用 clip-path
+ *      而非 overflow:hidden（详见 RoomRow.module.css 的 .bar 规则）。
  * 层叠 / 命中：.barsLayer 自身 pointer-events:none，让非 bar 区域的鼠标
  *      事件穿透到底层 cell / row（保留 :hover 伪类驱动的视觉态）；
  *      bar 元素则恢复 pointer-events:auto 接收 click。
@@ -55,42 +78,37 @@ interface GridBookingBarsProps {
  */
 export const GridBookingBars = memo(function GridBookingBars({
   bookings,
-  roomUnits,
   visibleStartIndex,
   visibleEndIndex,
   columnWidthPx,
-  rowHeightPx,
+  rowTopByRoomId,
+  laneByBookingId,
+  laneHeightPx,
   barOffsetTopPx,
   labelColumnWidthPx,
   dateRangeStart,
   onBookingClick,
 }: GridBookingBarsProps) {
-  // roomId → rowIndex 索引：bar 不再天然属于某一 RoomRow，需在 grid 层
-  // 建立映射决定 top；roomUnits 已是有序数组，O(N) 一次性建表即可。
-  const rowIndexByRoomId = useMemo(() => {
-    const map = new Map<string, number>();
-    roomUnits.forEach((room, index) => map.set(room.id, index));
-    return map;
-  }, [roomUnits]);
-
   const visibleBookings = useMemo(() => {
     return bookings
       .map((b) => {
         const startDay = diffDays(dateRangeStart, b.checkIn);
         const endDay = diffDays(dateRangeStart, b.checkOut);
-        const rowIndex = rowIndexByRoomId.get(b.roomUnit.roomId);
+        const rowTop = rowTopByRoomId.get(b.roomUnit.roomId);
+        const lane = laneByBookingId.get(b.id) ?? 0;
         const color = STATUS_COLOR_VARS[b.status] ?? STATUS_FALLBACK_COLOR;
-        return { booking: b, startDay, endDay, rowIndex, color };
+        return { booking: b, startDay, endDay, rowTop, lane, color };
       })
       .filter(
-        ({ startDay, endDay, rowIndex }) =>
-          rowIndex !== undefined &&
+        ({ startDay, endDay, rowTop }) =>
+          rowTop !== undefined &&
           endDay >= visibleStartIndex &&
           startDay <= visibleEndIndex,
       );
   }, [
     bookings,
-    rowIndexByRoomId,
+    rowTopByRoomId,
+    laneByBookingId,
     visibleStartIndex,
     visibleEndIndex,
     dateRangeStart,
@@ -99,15 +117,17 @@ export const GridBookingBars = memo(function GridBookingBars({
   return (
     <>
       {visibleBookings.map(
-        ({ booking, startDay, endDay, rowIndex, color }) => {
-          const clippedStart = Math.max(startDay, visibleStartIndex);
-          const x = labelColumnWidthPx + clippedStart * columnWidthPx;
-          const y = (rowIndex as number) * rowHeightPx + barOffsetTopPx;
-          const width = (endDay - clippedStart + 1) * columnWidthPx;
-          // 用 transform: translate3d 推动位置而非 inline left/top：滚动改写
-          // 仅触发 compositor 重新摆位，跳过 layout / paint；translate3d 的
-          // 第三参（z=0）显式声明 GPU 合成层，与 .bar 上的 will-change:
-          // transform 配合稳定开层。
+        ({ booking, startDay, endDay, rowTop, lane, color }) => {
+          const x = labelColumnWidthPx + Math.max(0, startDay * columnWidthPx);
+          const y = (rowTop as number) + lane * laneHeightPx + barOffsetTopPx;
+          const width = (endDay - Math.max(0, startDay) + 1) * columnWidthPx;
+          // 用 inline left/top 而非 transform：父级 transform 会破坏内部
+          // .barLabel 的 position:sticky 参照系（实测 sticky 会以 .bar 自身
+          // 而非 .body 为 scrollport，导致文字粘在 bar 内固定偏移、不再
+          // 跟随真实滚动）。改用 left/top 后 sticky 正确以 .body 为参照。
+          // 性能：x / y 不再依赖 scrollLeft，React 浅比对 inline style 不
+          // 会触发 DOM 写入；滚动本身由滚动容器整体合成处理，不依赖每条
+          // bar 各自开 compositor layer。
           return (
             <div
               key={booking.id}
@@ -117,10 +137,13 @@ export const GridBookingBars = memo(function GridBookingBars({
               style={{
                 width: width - 2,
                 background: color,
-                transform: `translate3d(${x}px, ${y}px, 0)`,
+                left: x,
+                top: y,
               }}
             >
-              {booking.guestName}
+              {/* 文字 sticky 由 .barLabel 的 CSS position:sticky 驱动，
+                  无需 JS 跟踪 scrollLeft / visibleStartIndex；详见样式注释。 */}
+              <span className={styles.barLabel}>{booking.guestName}</span>
             </div>
           );
         },

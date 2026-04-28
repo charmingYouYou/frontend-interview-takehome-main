@@ -1,11 +1,11 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Booking, RoomUnit } from '@/types'
 import { useVisibleRange } from '@/hooks/useVisibleRange'
-import { useRowStride } from '@/hooks/useRowStride'
 import { RoomRow } from './RoomRow'
 import { GridBookingBars } from './GridBookingBars'
 import { BOOKING_CONFIG } from '@/lib/bookingConfig'
 import { buildDayLabels } from '@/lib/date'
+import { assignLanes } from '@/lib/laneAssignment'
 import styles from './BookingGrid.module.css'
 
 interface BookingGridProps {
@@ -56,15 +56,35 @@ export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGrid
   const {
     COLUMN_WIDTH_PX,
     LABEL_COLUMN_WIDTH_PX,
-    ROW_HEIGHT_PX,
+    LANE_HEIGHT_PX,
     BAR_OFFSET_TOP_PX,
     TOTAL_DAYS,
     DATE_RANGE_START,
   } = BOOKING_CONFIG
-  // 实测首行 offsetHeight 作为行 stride 的真理来源；ROW_HEIGHT_PX 仅作
-  // SSR / 首帧 fallback，挂载后第一帧立即被实测值覆盖。
-  const [firstRowRef, rowStride] = useRowStride<HTMLDivElement>(ROW_HEIGHT_PX)
   const dayLabels = buildDayLabels(DATE_RANGE_START, TOTAL_DAYS)
+
+  // Lane（泳道）分配：同房型重叠 booking 被分到不同 lane，行高随之展开。
+  // 仅依赖 bookings 与 dateRangeStart，跨横滚 / 纵滚 / hover 全部稳定，
+  // 子组件 React.memo 浅比较仍可命中。
+  const { laneByBookingId, laneCountByRoomId } = useMemo(
+    () => assignLanes(bookings, DATE_RANGE_START),
+    [bookings, DATE_RANGE_START],
+  )
+
+  // rowTopByRoomId：每行顶边相对 .barsLayer 顶部的 y 偏移（px）。
+  // 累积公式：第 i 行 top = Σ_{j<i} (laneCount[j] × LANE_HEIGHT_PX + 1)
+  // 其中 +1 对应 .row 的 1px border-bottom。GridBookingBars 用此表
+  // 直接定位 bar，取代旧版"rowIndex × rowHeightPx"的等宽行假设。
+  const rowTopByRoomId = useMemo(() => {
+    const map = new Map<string, number>()
+    let cumulative = 0
+    for (const room of roomUnits) {
+      map.set(room.id, cumulative)
+      const laneCount = laneCountByRoomId.get(room.id) ?? 1
+      cumulative += laneCount * LANE_HEIGHT_PX + 1
+    }
+    return map
+  }, [roomUnits, laneCountByRoomId, LANE_HEIGHT_PX])
 
   return (
     <div className={styles.root}>
@@ -96,27 +116,26 @@ export function BookingGrid({ roomUnits, bookings, onBookingClick }: BookingGrid
           {/* 行区 + bar 层共用同一定位上下文：rowsLayer 既排列 RoomRow，
               又承载绝对定位的 .barsLayer 让其覆盖所有行的二维平面。 */}
           <div className={styles.rowsLayer}>
-            {roomUnits.map((room, i) => (
+            {roomUnits.map((room) => (
               <RoomRow
                 key={room.id}
-                // 仅首行挂 ref：useRowStride 实测一行即可代表全表（所有
-                // RoomRow 共用同一套 CSS 规则，stride 一致）；其余行 ref=undefined
-                // 不影响 React.memo 浅比较，渲染次数仍收敛为 0。
-                ref={i === 0 ? firstRowRef : undefined}
                 rowName={room.name}
                 totalDays={TOTAL_DAYS}
                 columnWidthPx={COLUMN_WIDTH_PX}
+                laneCount={laneCountByRoomId.get(room.id) ?? 1}
+                laneHeightPx={LANE_HEIGHT_PX}
               />
             ))}
 
             <div className={styles.barsLayer}>
               <GridBookingBars
                 bookings={bookings}
-                roomUnits={roomUnits}
                 visibleStartIndex={startIndex}
                 visibleEndIndex={endIndex}
                 columnWidthPx={COLUMN_WIDTH_PX}
-                rowHeightPx={rowStride}
+                rowTopByRoomId={rowTopByRoomId}
+                laneByBookingId={laneByBookingId}
+                laneHeightPx={LANE_HEIGHT_PX}
                 barOffsetTopPx={BAR_OFFSET_TOP_PX}
                 labelColumnWidthPx={LABEL_COLUMN_WIDTH_PX}
                 dateRangeStart={DATE_RANGE_START}
