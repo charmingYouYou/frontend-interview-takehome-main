@@ -12,8 +12,8 @@
 10. `/messages` 路由 query 同时维护 `ticketId` + `houseId` 两个参数，但 `houseId` 是 `ticket` 的派生属性（`tickets.find(t => t.id === ticketId).houseId` 即可还原），构成"双真理来源"：刷新 / 分享 / 浏览器前进后退路径下需额外约束 `houseId` 与 `ticketId` 互相一致，否则可能出现"ticket 与 house 不同源"的非法 URL 状态。语义上 `ticketId` 已具完整定位能力，`houseId` 应作为派生量从 ticket 数据查表得到，不应进入 URL。
 11. `BookingDrawer` 共有字段事实来源错位：抽屉的 Guest / Room / Dates / Status / Amount 五个共有字段全部直接从父级透传的 `booking` prop 渲染，而 `useBookingDetail` 拉回的 `detail` 仅被消费在「Additional Details」区。语义上 `booking` 只是日历列表视图的快照（用于 Drawer 打开瞬间的乐观首屏），`detail` 才是服务端权威数据；当 detail 命中后共有字段未切换到 detail，会导致：(1) 服务端在用户打开抽屉期间更新（如 status 由 `pending` 变为 `confirmed`、totalAmount 调整、改房）时，抽屉持续展示列表快照旧值，与详情区的最新数据形成同屏不一致；(2) 列表数据与详情接口字段口径若有差异（如格式化、汇率换算），抽屉会同时呈现两套口径；(3) 共有字段事实来源在视图层处于"未声明"状态，后续 detail 接口扩展任何字段都需要逐处判断要不要回切。根因是缺少"detail（远端权威） > booking（首屏占位）"的优先级约定。
 12. 异步态渲染缺乏统一基础设施，loading / error / empty 三态各自为政：(1) `pages/index` 在页头用 `<span>Loading...</span>` 表达加载态、网格区用 `<div>Loading bookings.../No bookings found.</div>` 三元混写表达 loading 与 empty，两处文案各写一遍；(2) `BookingDrawer` 的附加详情区以 `isLoading && <span>loading...</span>` + `detail ? <Rows> : !isLoading ? <empty> : null` 三层条件嵌套表达三态，控制流跳跃且新增分支极易遗漏；(3) `pages/messages` 与 `Sidebar` 在 loading / error 路径上完全静默渲染空列表，对用户没有任何反馈；(4) **错误态在视图层全局缺位** —— 没有任何组件消费 SWR 的 `error` 字段，4xx/5xx / 网络异常一旦发生只能在控制台看到 `httpGet` 抛出，UI 表现为"永远加载中"或"永远空数据"；(5) 没有 React 错误边界，渲染期任意一处抛错（例如下游组件 props 解构失败）即整树白屏。整体表现为"loading 文案是装饰品而不是契约、error 是缺席状态、empty 与 loading 视觉与文案到处复制"。
-13. BookingGrid的roomBookings每次都生成新数组, 导致重渲染, 要useMemo
-14. RoomRow的日格背景hover可以用css实现, 日格背景应该永不重渲染, 只有booking bar重渲染
+13. `BookingGrid` 内 `roomUnits.map` 渲染时以 `bookings.filter(b => b.roomUnit.roomId === room.id)` 内联派发每行的预订子集，存在两类工程问题：(1) `roomBookings` 数组在每次父组件渲染时都被重新构造，引用跨帧不稳定 —— 即便 `RoomRow` 后续接入 `React.memo`，`bookings` prop 的浅比较也会因新引用被全部命中、跳过失效；(2) 单次渲染对 `bookings` 全集做 N 次 O(M) 线性扫描（N = 房型数、M = 预订总数），整体 O(N×M) 开销在网格滚动等高频重渲染路径下被放大。需要在 `BookingGrid` 内一次性 `useMemo` 按 `roomId` 分桶为 `Map<string, Booking[]>`，消费侧改用 `Map.get` 拿到引用稳定的子集，将复杂度收敛为单次 O(M) 分桶 + O(1) 命中。
+14. `RoomRow` 的日格 hover 视觉态以 React state（`hoveredCell`）+ 单元格 `onMouseEnter` / `onMouseLeave` 实现，存在两类工程问题：(1) hover 本质是纯视觉态、无业务副作用，却被强行接入 React 渲染链路 —— 鼠标每次进出格子都会触发 `BookingGrid` `setState` → 全部 `RoomRow` 重渲染，含每行的所有日格与预订条，与"hover 只该影响一格视觉"的语义严重错配；(2) 日格背景层仅依赖 `visibleRange × columnWidthPx` 几何参数，与 `bookings` 数据完全正交，但当前实现下 SWR 数据刷新会同时触发日格层与 booking bar 层重渲染，未做关注点分离。需要 (a) 把 `.row:hover` / `.cell:hover` 下沉到 CSS Module 伪类承载，删除 `hoveredCell` JS state 与配套 props 链路；(b) 把日格背景拆为独立的 `<DayCells>` 子组件并 `React.memo`，依赖项仅为几何参数，与 booking bar 渲染解耦；(c) `RoomRow` 自身接入 `React.memo`，与第 13 点的 props 引用稳定化形成完整的"分桶 → 子集稳定 → memo 命中 → 子组件分层"重渲染抑制链路。
 15. BookingGrid首行首列应该sticky
 16. BookingGrid缺少a11y
 17. 缺少单测和E2E
@@ -106,6 +106,25 @@
     - **a11y 前置**：所有占位组件就位即附 `role` / `aria-live` 属性，未来 issue 16 的 a11y 改造可直接复用这套基础设施，无需返工。
     - **效果**：(a) loading / error / empty 三态在四个消费点视觉与文案统一，新增任何 SWR 调用接入 `<AsyncBoundary>` 即开箱获得三态渲染；(b) 错误态在视图层从"全局缺席"变为"就近可见 + 可重试"；(c) 渲染期意外异常不再白屏；(d) 全局观测点单一，便于后续接入 Sentry / Toast / Datadog。
     - **覆盖清单**：新增 `components/Async/AsyncBoundary.tsx` / `components/Async/AsyncBoundary.module.css` / `components/Async/ErrorBoundary.tsx` 共 3 个文件；改动 `pages/_app.tsx` / `pages/index.tsx` / `pages/index.module.css` / `pages/messages/index.tsx` / `components/BookingDrawer/BookingDrawer.tsx` / `components/BookingDrawer/BookingDrawer.module.css` 共 6 个文件；`tsc --noEmit` 与 `next build` 均通过，无新增类型错误。
+13. 按 **「按 roomId 一次性分桶 + 子集引用稳定 + 子组件 React.memo」** 原则重构 `BookingGrid` 的预订派发路径，消除内联 filter 的引用抖动与重复扫描：
+    - **分桶替代 N 次 filter**：在 `BookingGrid` 内以 `useMemo` 维护 `bookingsByRoom: Map<string, Booking[]>`，依赖 `[bookings, roomUnits]`，单次 O(M) 遍历建立 `roomId → Booking[]` 索引；`roomUnits.map` 渲染时改用 `bookingsByRoom.get(room.id) ?? EMPTY_BOOKINGS` 拿子集，将原 O(N×M) 重复扫描收敛为 O(M) 分桶 + O(1) 命中。
+    - **子集引用跨帧稳定**：分桶 Map 在 `bookings` / `roomUnits` 不变时引用稳定，每个房型对应的 `Booking[]` 子数组也跟随稳定；滚动等高频重渲染路径下 `RoomRow` 的 `bookings` prop 引用不再每帧重置。
+    - **未命中兜底引用稳定**：模块级常量 `EMPTY_BOOKINGS: Booking[] = []` 作为 `Map.get` 未命中的回退值，避免每次渲染都构造新的 `[]` 字面量破坏 `React.memo` 的浅比较。
+    - **`RoomRow` 接入 `React.memo`**：本条配套把 `RoomRow` 默认导出改为 `memo(RoomRowImpl)`，props 浅比较命中即跳过整行渲染；分桶产出的稳定子集 + memo 形成闭环 —— 当只有滚动 / 选中态等与某行无关的状态变化时，未受影响的行整体跳过重渲染。
+    - **效果**：在 SWR `bookings` 不变的所有场景（滚动、Drawer 开合、其它行 hover、查询参数变化等），所有 `RoomRow` 的 `bookings` prop 引用恒定；配合第 14 条删除 `hoveredCell` 状态后，BookingGrid 自身的重渲染频次也大幅下降。
+    - **覆盖清单**：改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/RoomRow.tsx` 共 2 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
+14. 按 **「Hover 视觉态 CSS 化 + 日格几何层独立 memo + RoomRow 整体 memo」** 原则重构 `RoomRow` 的渲染结构，把无业务副作用的 hover 状态彻底移出 React 渲染链路，并按"几何层"与"数据层"做关注点分离：
+    - **Hover 下沉到 CSS 伪类**：`RoomRow.module.css` 把 `.rowHovered` / `.cellHovered` 替换为 `.row:hover` / `.cell:hover`，行 / 日格 hover 由浏览器原生伪类匹配触发；同步删除 `BookingGrid` 中 `useState<HoveredCell>` 与 `setHoveredCell`、`RoomRow` 中 `hoveredCell` / `onHoverCell` props、`HoveredCell` 类型导出、单元格 `onMouseEnter` / `onMouseLeave` 事件绑定共一整条链路。鼠标每次进出格子触发的 `setState` → 全部 `RoomRow` 重渲染开销归零，与"hover 只该影响一格视觉"的语义对齐。
+    - **`RoomRow` 拆为「行容器 + 几何层 `<DayCells>` + 数据层 `<BookingBars>`」三层，子层各自 `React.memo`，按"几何 / 数据"分层做差异化虚拟化**：
+      - **几何层 `<DayCells>`：全量渲染、永不重渲染**。仅消费 `totalDays` / `columnWidthPx` 两个模块级常量（来自 `BOOKING_CONFIG`，跨整个应用生命周期不变），与 `bookings` 数据、滚动状态完全正交；props 跨帧恒定意味着 memo 浅比较永久命中 —— 无论 SWR 数据刷新还是网格横滚，本层 DOM 都不会重渲染。日格全量渲染（30 列 / 行）的成本极低，但换来"几何层零重渲染"的稳定基线。
+      - **数据层 `<BookingBars>`：按窗口过滤 + 独立 memo**。把 `visibleBookings` 的 `useMemo` 计算（按 `dateRangeStart` 计算 dayIndex 跨度 + 按 `visibleStartIndex` / `visibleEndIndex` 过滤 + 状态色映射）与 bar 渲染整体抽离到独立 memo 子组件；当父级 `RoomRow` 因无关 prop（如父级回调引用变化）浅比较失败而重渲染时，`BookingBars` 的 props 若未变即跳过 `visibleBookings` 重新计算与 DOM 重渲染。同时该层可对"给定 bookings × 窗口 → 渲染子集与定位"契约做独立单测，不依赖 RoomRow。
+      - **差异化虚拟化策略**：bar 数量在长尾房间历史预订堆积场景下可能远大于日格数（每行数十至数百条），保留窗口过滤是数据层的合理虚拟化；几何层（30 cell / 行）量级小且常量化，全量渲染换稳定 memo 命中。"几何全量、数据窗口"两套策略各自服务于其层的特点。
+      - **行容器瘦身**：`RoomRow` 自身退化为纯布局容器（label + timeline），不再持有任何渲染逻辑或 `useMemo`，所有重渲染敏感代码集中到两个子层。
+      - **关注点分离**：`visibleStartIndex` / `visibleEndIndex` 仅下发到 `BookingBars`，不再透给 `DayCells`；几何层与数据层各自决定是否需要虚拟化、各自决定 memo 依赖项，互不耦合。
+    - **`RoomRow` 整体 `React.memo`**：默认导出改为 `export const RoomRow = memo(RoomRowImpl)`，与第 13 条的子集引用稳定化共同生效；上层无关行（如其它行的视觉变化、Drawer 开合）触发的 `BookingGrid` 重渲染下，`RoomRow` 浅比较命中即整体跳过。
+    - **副产物清理**：移除调试遗留 `console.log("render", rowId)` 与不再使用的 `clsx` 依赖；`HoveredCell` 类型不再导出；`BookingGrid.tsx` 头注释同步更新"状态归属"段（不再持有任何 hover 相关 React 状态）。第 3 条原本下沉到 `BookingGrid` 本地的 `hoveredCell` state 至此被进一步消除，回归"无状态网格 + CSS 伪类"的最简形态。
+    - **效果**：(a) 鼠标在网格内悬停操作不再产生任何 React 渲染；(b) SWR `bookings` 刷新时仅 booking bar 层重渲染，日格背景层稳定不动；(c) 与第 13 条共同形成完整的"分桶 → 子集稳定 → memo 命中 → 子组件分层"重渲染抑制链路，为后续问题 15（sticky）/ 16（a11y）改造留出干净的渲染基线。
+    - **覆盖清单**：改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/RoomRow.tsx` / `components/BookingGrid/RoomRow.module.css` 共 3 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
 
 ## 权衡取舍
 
@@ -123,3 +142,4 @@
 3. 日历数据分页获取
 4. UI适配多设备, 如pc小屏是否收起Sidebar, 是否适配pad和mobile
 5. 把Loading优化为骨架屏, 提升用户体验
+6. 把bookingbar和grid分离, 保证grid只渲染一次, 维持浏览器滚动; bookingbar通过top, left, width进行定位&重渲染

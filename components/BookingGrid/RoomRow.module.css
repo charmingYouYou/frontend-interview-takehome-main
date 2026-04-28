@@ -7,7 +7,8 @@
  *       传入；本文件只描述布局结构、视觉规格与交互过渡。
  */
 
-/* 行容器：水平排列「行标签 + 时间轴」，整行 hover 通过 .rowHovered 叠加。 */
+/* 行容器：水平排列「行标签 + 时间轴」，hover 视觉态由 CSS `:hover` 伪类承担，
+ * 不进入 React 状态与渲染链路 —— 鼠标进出行不会触发任何 setState。 */
 .row {
   display: flex;
   align-items: center;
@@ -16,7 +17,7 @@
   transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-.rowHovered {
+.row:hover {
   background: var(--color-bg-row-hover);
 }
 
@@ -40,7 +41,11 @@
   flex: 1;
 }
 
-/* 日格背景：等宽栅格单元，hover 通过 .cellHovered 叠加。 */
+/* 日格背景：等宽栅格单元，hover 视觉态由 CSS `:hover` 伪类承担。
+ * 选用伪类而非 JS state 的考量：cell hover 是纯视觉态，无任何业务副作用，
+ * 走 React 渲染链路只会引入"鼠标进出格子 → setState → 全树重渲染"的
+ * 无谓开销；CSS 方案下日格背景层作为纯几何渲染产物，配合 React.memo
+ * 拆分后可在数据刷新场景下完全跳过重渲染。 */
 .cell {
   position: absolute;
   height: var(--size-row-height);
@@ -49,7 +54,7 @@
   transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-.cellHovered {
+.cell:hover {
   background: var(--color-bg-cell-hover);
 }
 
