@@ -1,178 +1,132 @@
 ## 发现的问题
 <!-- 列出你识别出的每个问题 -->
-1. `RoomRow.tsx` 启动即抛 `ReferenceError: Cannot access 'getBookingStatus' before initialization`：`getBookingStatus` 以 `const` 箭头函数声明，却在其声明语句之前的 `useMemo` 回调中被同步调用，触发 TDZ（暂时性死区）异常，导致组件首次渲染失败。
-2. 视觉规格强耦合在 JSX inline `style` 中，缺乏单一事实来源：`RoomRow` / `BookingGrid` 等核心组件将颜色、间距、尺寸、圆角等视觉属性以字面量形式散落在 20+ 处 inline style 中（如 `#eee` / `#f0f0f0` / `#ddd` 三套近似分隔线、重复出现的 `48 / 140 / 40` 魔法数字）。带来的工程问题：(1) 同一语义的视觉值无统一约束，长期演进必然漂移；(2) hover / selected 等交互状态以三元运算耦合在 JSX 中，难以静态审查、复用与测试；(3) 无主题切换扩展点（dark mode / 多品牌主题），未来接入需要全文回改组件；(4) 每次渲染重新构造同一份 inline style 对象，无法被浏览器样式表缓存与共享。
-3. `_app.tsx` 顶层 Provider 抽象越界，全局 Context 承载了本不该共享的状态：(1) `AppContext` 实际只暴露一份不可变默认配置 + 仅在 `BookingGrid` 子树内共享的 `hoveredCell`，被强行提升至 App 根，导致 `/messages` 等无关路由也进入订阅链路并被无谓重渲染；(2) `MessagesContext` 维护的 `currentHouse` / `activeTicketId` 与 URL query 完全同义，构成"路由 → context → 页面"的双真理来源，刷新与跳转两条路径下数据极易漂移；(3) `unreadCount` 是 `/api/tickets` 的派生量，却由 `/messages` 页面在 `useEffect` 里反向写入 Context 给 Sidebar 消费，形成"页面 setState → context → 侧栏"的脆弱同步链 —— SWR 同 key 自带跨组件缓存与一致性，根本无须再过一层 Context。
-4. Booking 网格的运行时常量在多处重复定义且语义错位：列宽 `COLUMN_WIDTH_PX = 48` 同时硬编码于 `BookingGrid` / `RoomRow` / `useVisibleRange` 三处，`TOTAL_DAYS = 30` 与 `VISIBLE_COLUMNS = 14` 也分散在 `BookingGrid` 与 hook 内部，主体 `minWidth` 计算里的 `+ 140` 更是无名魔法数字；与此同时承载这些值的类型 `AppConfig` 与单例 `APP_CONFIG` 命名为"应用级"，但所有字段（日历窗口、列宽、表头背景）实际都是 Booking 网格专属，抽象层级与命名严重错位 —— 既无法跨文件保持一致（任何一处改 48 都会引入视觉漂移），也阻碍未来 Messages 等其他域配置的并行扩展。
-5. SWR 请求层缺乏抽象，调用样板大量散落且各自为政：(1) 同一份 `(url) => fetch(url).then(r => r.json())` fetcher 在 `pages/index` / `pages/messages/index` / `Sidebar` / `BookingDrawer` 共复制 4 份，且全部缺失 `res.ok` 校验，4xx/5xx 响应会被当作正常 JSON 渲染；(2) API 路径以字符串字面量出现在多处（`'/api/tickets'` 在 Sidebar 与 messages 页各写一遍，`/api/tickets/:id/read` 在 messages 页内联拼接），改路径需要全仓搜索；(3) 写操作（`POST /api/tickets/:id/read`）以裸 `fetch` 形式与 SWR 体系并行存在，乐观更新模板（mutate + optimisticData + revalidate）只能耦合写在页面组件里，复用与单测都无从下手；(4) 没有错误类型定义，状态码差异无法在调用层做精细分支处理。整体表现为"SWR 用了，但请求层并没有真正建立"。
-6. 日期处理逻辑分散且缺少统一基准，存在跨日边界（off-by-one）隐患：(1) `new Date()` 在 `lib/bookingConfig`（`DATE_RANGE_START` / `DATE_RANGE_END`）、`lib/mockData.dateStr`、`BookingGrid.getDayLabels`、`RoomRow.useMemo` 共 8+ 处独立调用，模块求值期与组件渲染期分别取系统时间，若用户在 23:59 → 00:01 边界触发渲染，"今天"在不同文件取到不同值，导致日历窗口起点、mock 锚点、预订条偏移量出现 1 天漂移；(2) 跨日天数计算以 `(new Date(a) - new Date(b)) / (1000 * 60 * 60 * 24)` 手算样板形式重复 4 处，遇夏令时切换会得到非整数误差，且无法统一替换实现；(3) 日期格式化（`d.getMonth() + 1` / `toISOString().split('T')[0]`）散落各处，无单一事实来源，未来若需扩展时区 / 国际化 / 农历能力需要全文回改。整体表现为"日期处理"作为基础设施完全缺失，业务代码直接耦合 `Date` 原生 API。
-7. `BookingDrawer` 选中态仅以 `pages/index.tsx` 内部的 `useState<selectedBooking>` 维护，缺乏持久化与可分享性：(1) 刷新页面后选中态丢失，必须重新点击才能定位到原 Booking，对长会话操作（编辑、查阅详情）极不友好；(2) URL 不携带选中信息，链接无法分享给同事直达指定 Booking；(3) 浏览器前进/后退按钮不能在"打开/关闭 Drawer"两态间往返，与用户对路由式 UI 的常规预期相悖；(4) 与 `/messages` 通过 `ticketId` query 派生选中态的策略形成双标，整站交互范式不一致。
-8. `BookingDrawer.getStatusPillClass` 状态分支不完整：当前实现仅对 `in_house` / `confirmed` 两态显式分支，`pending` / `checked_out` / `cancelled` 全部回落到 `statusPillDefault`，导致 BookingStatus 五态在 UI 层只表达了三态。根因在于该函数以 `if/else` 串行判断 + 入参 `status: string` 的弱类型签名形式实现，新增枚举成员时编译器无法静态强制覆盖；属于"枚举完备性"在边界处的失守。
-9. `BookingStatus` 与其展示元数据存在多份事实来源：(1) `BookingStatus` 以 string union 形式声明在 `types/index.ts`，运行时无可枚举句柄，下游只能写裸字面量 `'in_house'` / `'pending'`；(2) `STATUS_LABELS`（`BookingDrawer`）与 `STATUS_COLOR_VARS`（`RoomRow`）以同义字面量 key 在两个组件中独立维护；(3) 任何一方新增 / 删除状态都需要跨文件同步修改，且 `Record<…, T>` 漏写不会被 TS 静态发现 —— issue 8 即为此类典型。需将 `BookingStatus` 改造为枚举（运行时可枚举 + nominal 类型），并把状态域的展示元数据集中到单一模块维护。
-10. `/messages` 路由 query 同时维护 `ticketId` + `houseId` 两个参数，但 `houseId` 是 `ticket` 的派生属性（`tickets.find(t => t.id === ticketId).houseId` 即可还原），构成"双真理来源"：刷新 / 分享 / 浏览器前进后退路径下需额外约束 `houseId` 与 `ticketId` 互相一致，否则可能出现"ticket 与 house 不同源"的非法 URL 状态。语义上 `ticketId` 已具完整定位能力，`houseId` 应作为派生量从 ticket 数据查表得到，不应进入 URL。
-11. `BookingDrawer` 共有字段事实来源错位：抽屉的 Guest / Room / Dates / Status / Amount 五个共有字段全部直接从父级透传的 `booking` prop 渲染，而 `useBookingDetail` 拉回的 `detail` 仅被消费在「Additional Details」区。语义上 `booking` 只是日历列表视图的快照（用于 Drawer 打开瞬间的乐观首屏），`detail` 才是服务端权威数据；当 detail 命中后共有字段未切换到 detail，会导致：(1) 服务端在用户打开抽屉期间更新（如 status 由 `pending` 变为 `confirmed`、totalAmount 调整、改房）时，抽屉持续展示列表快照旧值，与详情区的最新数据形成同屏不一致；(2) 列表数据与详情接口字段口径若有差异（如格式化、汇率换算），抽屉会同时呈现两套口径；(3) 共有字段事实来源在视图层处于"未声明"状态，后续 detail 接口扩展任何字段都需要逐处判断要不要回切。根因是缺少"detail（远端权威） > booking（首屏占位）"的优先级约定。
-12. 异步态渲染缺乏统一基础设施，loading / error / empty 三态各自为政：(1) `pages/index` 在页头用 `<span>Loading...</span>` 表达加载态、网格区用 `<div>Loading bookings.../No bookings found.</div>` 三元混写表达 loading 与 empty，两处文案各写一遍；(2) `BookingDrawer` 的附加详情区以 `isLoading && <span>loading...</span>` + `detail ? <Rows> : !isLoading ? <empty> : null` 三层条件嵌套表达三态，控制流跳跃且新增分支极易遗漏；(3) `pages/messages` 与 `Sidebar` 在 loading / error 路径上完全静默渲染空列表，对用户没有任何反馈；(4) **错误态在视图层全局缺位** —— 没有任何组件消费 SWR 的 `error` 字段，4xx/5xx / 网络异常一旦发生只能在控制台看到 `httpGet` 抛出，UI 表现为"永远加载中"或"永远空数据"；(5) 没有 React 错误边界，渲染期任意一处抛错（例如下游组件 props 解构失败）即整树白屏。整体表现为"loading 文案是装饰品而不是契约、error 是缺席状态、empty 与 loading 视觉与文案到处复制"。
-13. `BookingGrid` 内 `roomUnits.map` 渲染时以 `bookings.filter(b => b.roomUnit.roomId === room.id)` 内联派发每行的预订子集，存在两类工程问题：(1) `roomBookings` 数组在每次父组件渲染时都被重新构造，引用跨帧不稳定 —— 即便 `RoomRow` 后续接入 `React.memo`，`bookings` prop 的浅比较也会因新引用被全部命中、跳过失效；(2) 单次渲染对 `bookings` 全集做 N 次 O(M) 线性扫描（N = 房型数、M = 预订总数），整体 O(N×M) 开销在网格滚动等高频重渲染路径下被放大。需要在 `BookingGrid` 内一次性 `useMemo` 按 `roomId` 分桶为 `Map<string, Booking[]>`，消费侧改用 `Map.get` 拿到引用稳定的子集，将复杂度收敛为单次 O(M) 分桶 + O(1) 命中。
-14. `RoomRow` 的日格 hover 视觉态以 React state（`hoveredCell`）+ 单元格 `onMouseEnter` / `onMouseLeave` 实现，存在两类工程问题：(1) hover 本质是纯视觉态、无业务副作用，却被强行接入 React 渲染链路 —— 鼠标每次进出格子都会触发 `BookingGrid` `setState` → 全部 `RoomRow` 重渲染，含每行的所有日格与预订条，与"hover 只该影响一格视觉"的语义严重错配；(2) 日格背景层仅依赖 `visibleRange × columnWidthPx` 几何参数，与 `bookings` 数据完全正交，但当前实现下 SWR 数据刷新会同时触发日格层与 booking bar 层重渲染，未做关注点分离。需要 (a) 把 `.row:hover` / `.cell:hover` 下沉到 CSS Module 伪类承载，删除 `hoveredCell` JS state 与配套 props 链路；(b) 把日格背景拆为独立的 `<DayCells>` 子组件并 `React.memo`，依赖项仅为几何参数，与 booking bar 渲染解耦；(c) `RoomRow` 自身接入 `React.memo`，与第 13 点的 props 引用稳定化形成完整的"分桶 → 子集稳定 → memo 命中 → 子组件分层"重渲染抑制链路。
-15. `BookingGrid` 缺少首行（表头日期列）/ 首列（房型标签列）sticky 滚动行为，存在多类工程问题：(1) 当前布局把 `.header` 与 `.body` 拆为 `.root` 下的两个 flex 兄弟节点，`.body` 自带 `overflow: auto` 独立横滚，`.headerDays` 又显式 `overflow: hidden` —— 横滚时表头日期列与下方日格列彻底失去对应关系，用户无法读出当前列归属哪一天；(2) 纵滚时表头停留在视口顶部（因不在 `.body` 内），但行标签列（房型名）随 body 一起滚出，超过视口的房型用户无法定位当前行属于哪个房型，需反复回滚识别；(3) 现有"双 scroll container 隔离 + 表头窗口式渲染"近似模拟表头吸附，本质是布局层缺位、用 JS 状态绕行 —— 一旦未来需要 scrollLeft 同步必然要再加一层 `useEffect` 监听粘合，是典型的"用 JS 修补 CSS 应该提供的能力"反模式；(4) 表头 `.headerDays` 仅渲染 `[visibleStartIndex, visibleEndIndex]` 窗口，而 body 行的日格层经第 14 条改造后已是全量渲染，二者渲染范围口径错位 —— 即便临时同步 scrollLeft 也无法解决"表头视图不完整"的语义问题，未来扩展（时间轴标尺、节假日跨视口高亮、日期粘连提示）都会因表头缺失被卡住。
-16. `BookingBars` 渲染层级耦合在每行 `RoomRow` 内部，横滚链路下调度开销随房型数 N 线性放大：(1) `BookingBars` 作为每行 `RoomRow` 的子节点，横滚时 `visibleRange` 变化沿 `BookingGrid → 每行 RoomRow → 每行 BookingBars` 路径下发，尽管第 14 条已为 `RoomRow` / `DayCells` / `BookingBars` 各自接入 `React.memo`，但 `RoomRow` 的 `visibleStartIndex` / `visibleEndIndex` props 随每次滚动变化、`React.memo` 浅比较失败，N 行函数体仍要逐一执行以完成 props 转发；(2) 每行的 `BookingBars` 各自持有局部 `bookings` 子集独立 reconcile，N 个独立子组件各自跑一遍 `visibleBookings` `useMemo` 与子节点 diff，与"全网格同一份可视窗口"的语义错配；(3) bar 渲染逻辑被行边界绑死，未来如需对 bar 做跨行的统一布局（拖拽改房、跨房型分组）都要先解开行内嵌套，结构债务在累积。需把 `BookingBars` 整体上移到 grid 层，按 `(rowIndex, dayIndex)` 二维坐标统一渲染所有 bar，让 `RoomRow` 退化为纯几何骨架（props 跨帧稳定 → memo 永久命中 → 函数体执行收敛为 0）。
-17. 预订条 bar 的几何驱动以 inline `left` / `top` 注入，滚动改写走完整的 layout → paint 路径：(1) `position: absolute` + 像素级 `left/top` 改写每帧都触发浏览器重新计算 layout 与 paint，与合成线程隔离，无法享受 GPU 合成层加速；(2) 在第 16 条所述的"按列阈值跨变"路径下，每跨一列要同时移动 visibleBookings 内全部 bar 的 left/top，layout 抖动会传染给同一合成层内的其它元素；(3) 即便后续接入虚拟滚动 / 节流，"layout / paint 始终参与每帧" 这条主路径不消除，性能上限就被钉死。需要把位置驱动改为 `transform: translate3d` 并配合 `will-change: transform`，让浏览器为每条 bar 建立独立合成层，滚动改写仅触发 compositor 重新摆位，跳过 layout 与 paint。
-18. `useVisibleRange` 把 `scrollLeft` 直接作为 React state，存在两类工程问题：(1) `scrollLeft` 每像素都会随 onScroll 触发 setState，进而引发 `BookingGrid` 子树 reconcile，但实际派生量 `startIndex = floor(scrollLeft / COLUMN_WIDTH_PX)` 仅在跨过列边界（每 48px）时才变化 —— 同列内的 ~48 次 setState 全部是无效计算，与"列内滚动 hooks 应当短路"的语义错配；(2) hook 输出 `{ visibleRange: { startIndex, endIndex, offsetPx }, scrollLeft, handleScroll }` 中的 `offsetPx` / `scrollLeft` 自第 14 / 15 条虚拟化方案迭代后已无消费者（仅 hook 内部赋值），保留只会引导后续误用并扩大接口面。需要把 state 直接定义为 `startIndex`，`handleScroll` 用函数式 setter 比较新旧值实现同列短路；同时把无消费者的字段从输出表面剔除，输出收窄为拍平的 `{ startIndex, endIndex, handleScroll }`。
-19. BookingGrid缺少a11y
-20. 缺少单测和E2E
+
+> 二级分类：**A 运行时缺陷** · **B 架构与状态归属** · **C 基础设施缺位（单一事实源）** · **D 网格渲染性能**
+
+### A. 运行时缺陷
+
+1. `RoomRow.tsx` 启动即抛 TDZ 异常：`getBookingStatus` 以 `const` 声明，却在其上方 `useMemo` 中被同步调用，组件首屏渲染失败。
+
+2. `getStatusPillClass` 枚举不完备：`if/else` 仅覆盖两态、入参 `status: string` 弱类型，新增枚举成员编译器无法静态强制覆盖，五态在 UI 层只表达三态。
+
+### B. 架构与状态归属
+
+1. `_app.tsx` 顶层 Provider 抽象越界：`AppContext` 把 `BookingGrid` 子树态提到根、卷入无关路由；`MessagesContext` 与 URL query 形成双真理来源；`unreadCount` 反向回写 Context 是 SWR 派生量，链路脆弱。
+
+2. Drawer 选中态仅本地 `useState`，无持久化与可分享性：刷新丢失、URL 不带选中、前进/后退失效；与 `/messages` 的 `ticketId` 派生策略形成双标。
+
+3. `/messages` 路由 query 双参 `ticketId + houseId`：`houseId` 是 `ticket` 派生量，构成双真理来源，刷新 / 分享 / 外链易出非法 URL 状态。
+
+4. Drawer 共有字段事实来源错位：Guest / Room / Dates / Status / Amount 取 `booking` 快照不切到 `detail`，服务端在抽屉打开期间更新会出现同屏新旧值并存。
+
+### C. 基础设施缺位（单一事实源）
+
+1. 视觉规格强耦合 inline style，缺单一事实来源：核心组件散落 20+ 处字面量（`#eee` / `48` / `140`），近似值漂移、交互态以三元判断耦合 JSX、无主题切换扩展点、style 对象逐帧重建无法被样式表缓存。
+
+2. Booking 网格常量多处重复 + 抽象层级错位：`COLUMN_WIDTH_PX = 48` / `TOTAL_DAYS` / `VISIBLE_COLUMNS` / 魔法数 `+ 140` 散落 3 文件；`AppConfig` 命名为应用级实为 Booking 域，跨文件改一处即漂移。
+
+3. SWR 请求层缺抽象：`fetcher` 在 4 文件复制且无 `res.ok` 校验、API 路径字面量散落、写操作裸 `fetch` 与 SWR 并行、无错误类型 —— 名义上用 SWR，请求层未真正建立。
+
+4. 日期处理无统一基准：`new Date()` 在 8+ 处独立调用，跨日边界取值漂移；`(a - b) / 86400000` 手算样板重复 4 处遇 DST 失精；格式化散落各处，无单一替换点。
+
+5. `BookingStatus` 与展示元数据多份事实来源：string union 无运行时句柄、`STATUS_LABELS` / `STATUS_COLOR_VARS` 双副本，新增成员需跨文件同步且 TS 漏写不报错。
+
+6. 异步态视图层基础设施缺失：loading / error / empty 三态各自为政、文案重复；**error 在视图层全局缺席** —— SWR `error` 字段无消费者、无 ErrorBoundary，渲染抛错即白屏。
+
+### D. 网格渲染性能
+
+1. `BookingGrid` 内联 `bookings.filter(b => b.roomUnit.roomId === room.id)` 派发：每帧重构数组破坏 `React.memo` 浅比较，且 O(N×M) 重复扫描在高频重渲染路径下被放大。
+
+2. `RoomRow` 日格 hover 接入 React state：纯视觉态触发全部 `RoomRow` 重渲染；日格几何层与 booking 数据层未分离，SWR 刷新连带 cell 层重渲染。
+
+3. `BookingGrid` 缺首行 / 首列 sticky：`.header` 与 `.body` 双 scroll container 横滚后表头与日格失对位；纵滚时行标签滚出；窗口式表头与全量 body 渲染口径错位。
+
+4. `BookingBars` 嵌在每行 `RoomRow` 内：横滚改 `visibleRange` 触发 N 行函数体执行 + N 个 BookingBars 各自 reconcile，与"全网格同一可视窗口"语义错配。
+
+5. bar 几何走 inline `left / top`：每帧触发 layout / paint、无 GPU 合成；跨列时 `visibleBookings` 全量改写引发 layout 抖动，性能上限被钉死。
+
+6. `useVisibleRange` 把 `scrollLeft` 直接进 state：60Hz 像素流引发 reconcile 但派生量仅 48px 跨列变化，同列内 ~48 次 setState 全无效；输出 `offsetPx` / `scrollLeft` 已无消费者。
+
 
 ## 应用的修复
 <!-- 对于每个修复：你改变了什么，为什么，以及你选择了什么方法 -->
-1. `getBookingStatus` 仅有单一调用点且逻辑为一行映射，无独立封装价值。移除该函数定义，将 `useMemo` 内的调用就地替换为 `STATUS_COLORS[b.status] ?? "#ccc"`，从根本上消除 TDZ 引用顺序问题，同时减少一层冗余间接调用。
-2. 按 **Design Token + CSS Module** 双层结构对**全项目**进行样式隔离重构：
-   - **Token 层（`styles/tokens.css`）**：以 `:root` 暴露七类语义化 CSS 自定义属性 —— color / typography / spacing / size / radius / shadow / motion（另含 z-index 一档辅助层），作为全局视觉单一事实来源；命名遵循 `--<类目>-<语义>-<修饰>` 约定（如 `--color-bg-row-hover`、`--size-row-height`、`--shadow-drawer`）。业务状态色（`--color-status-*`）与状态 Pill 配色（`--color-pill-*`）一并纳入 token，确保颜色定义集中化。
-   - **样式层（每个组件独立 `*.module.css`）**：承载组件所有静态样式，仅消费 token 变量，禁止裸 hex 与魔法数字；交互态（hover / active / 未读 / pill 三态）拆分为独立类（如 `.rowHovered`、`.navLinkActive`、`.statusPillInHouse`），通过条件 className 切换，去除 JSX 中的三元样式分支。多 className 拼接由复用的 `cx(...)` 工具函数处理。
-   - **组件层**：所有 `.tsx` 文件 inline style 仅保留运行时不可静态化的几何 / 配置值 —— 如 `RoomRow` 中的 `left` / `width` 与状态背景色（已改为 `var(--color-status-*)` 字符串）、`BookingGrid` 中由 `AppContext` 注入的 `config.bookingHeaderBackground` 与依赖 JS 常量的 `minWidth`；其余 `Sidebar` / `BookingDrawer` / `pages/_app` / `pages/index` / `pages/messages/index` 共 5 个文件 inline style 已 100% 清空。
-   - **可扩展性**：该分层为后续 dark mode / 多品牌主题提供天然扩展点 —— 仅需挂载主题类（如 `[data-theme="dark"]`）覆盖 token 层即可整体换肤，组件代码零改动。
-   - **覆盖清单**：`RoomRow` / `BookingGrid` / `BookingDrawer` / `Sidebar` / `pages/_app` / `pages/index` / `pages/messages/index` 共 7 个组件 / 页面已落地，配套 7 份 `*.module.css`。
-   - **已知 token 缺口**（按「禁止扩展 token」约束保留为合成或字面量，并在对应 CSS 文件头注释中标注）：(a) `BookingDrawer` 状态 Pill 的 `padding: 3px 10px` 与详情行 `margin-bottom: 10px` 落在 spacing 阶梯空隙；(b) `Sidebar` 未读徽标圆角 10px 与 padding `1px 7px` 无 1:1 token，已就近映射到 `--radius-pill` + `--spacing-2`，存在 1px 量级偏离；(c) `pages` 中 14px / 3px 通过 `calc()` 合成现有 token 实现像素零差。后续若纳入扩展，集中在 token 层补齐即可，组件无需改动。
-3. 按 **「状态归属最小化 + 派生量不入仓」** 原则拆解全局 Context，整体下沉为局部状态、URL 派生与 SWR 派生三类来源，最终删除 `context/AppContext.tsx`、`context/MessagesContext.tsx` 及对应 Provider：
-   - **静态配置常量化**：原 `AppContext.defaultConfig` 抽离到 `lib/bookingConfig.ts` 暴露 `BOOKING_CONFIG`（见第 4 条收敛后命名），作为模块级只读单例直接 `import` 消费。从未运行时写入的不可变数据无需 Provider 包装，去除一层订阅心智与重渲染抖动。
-   - **cell hover 状态下沉**：`hoveredCell` 仅在 `BookingGrid` 子树内跨 `RoomRow` 共享，回归到 `BookingGrid` 内部 `useState` 维护，并以 `hoveredCell` / `onHoverCell` props 向 `RoomRow` 单向透传。其他路由不再被卷入该状态的渲染链路，`RoomRow` 也由"隐式订阅 Context"变为"显式接收 props"，便于复用与单测。
-   - **路由状态去 Context 化**：`activeTicketId` / `currentHouse` 改由 `useRouter().query` 直接派生，消除"路由 ↔ Context"双真理来源；保留 `getServerSideProps` 注入的 `initialTicketId` 作为 SSR 首屏兜底。
-   - **派生量改 SWR 共享**：`unreadCount` 由 `Sidebar` 直接 `useSWR<Ticket[]>('/api/tickets')` 后 `filter(t => t.unread).length` 得到；与 `/messages` 页共用同一 SWR key，天然获得请求去重、缓存复用与跨组件一致性，彻底删除"页面 `setUnreadCount` → Context → Sidebar"反向写入链路与配套 `useEffect`。
-   - **已读态闭环（乐观更新 + 远端写入 + 真值兜底）**：新增 `POST /api/tickets/:id/read` 接口在 mock 数据层把 `unread` 幂等置 false。`/messages` 页点击未读 ticket 时调用 `useSWRConfig().mutate(TICKETS_KEY, ...)` 一气呵成完成三件事：(a) `optimisticData` 立即在缓存里把命中项 `unread` 改为 false，列表红点 + Sidebar 徽标无需等待网络即时收敛；(b) mutator 内 `fetch` 远端接口持久化已读事实；(c) `revalidate: true` 让 SWR 在请求完成后用服务端权威数据再回填一次，请求失败则 `rollbackOnError` 回滚到先前缓存。两侧消费者订阅同一 key，自动跟随刷新，无需任何手写广播。
-   - **根组件瘦身**：`pages/_app.tsx` 移除 `AppProvider` / `MessagesProvider` 双层包裹，仅保留 Sidebar + main 两栏骨架；`context/` 目录连同两份 Context 文件一并删除，无残留死代码。
-   - **覆盖清单**：新增 `lib/bookingConfig.ts`（详见第 4 条改名收敛过程）与 `pages/api/tickets/[id]/read.ts`；改动 `BookingGrid` / `RoomRow` / `Sidebar` / `pages/_app` / `pages/messages/index` 共 5 个文件；删除 `context/AppContext.tsx` / `context/MessagesContext.tsx`。`tsc --noEmit` 校验通过，无新增类型错误。
-4. 按 **「Booking 域常量单一事实来源 + 抽象层级对齐」** 原则收敛配置：
-   - **类型与单例改名**：`types/index.ts` 中 `AppConfig` 重命名为 `BookingConfig`，`lib/appConfig.ts` 重命名为 `lib/bookingConfig.ts` 并将 `APP_CONFIG` 重命名为 `BOOKING_CONFIG`；命名收窄到 Booking 域后，职责边界一目了然，未来如需新增 Messages 等其他域的配置可独立创建 `*Config` 文件而不污染此处。
-   - **魔法数字下沉**：把原本散落在 `BookingGrid` / `RoomRow` / `useVisibleRange` 三处重复定义的 `COLUMN_WIDTH_PX = 48`、`BookingGrid` 内的 `TOTAL_DAYS = 30`、`useVisibleRange` 内的 `VISIBLE_COLUMNS = 14`、以及主体 `minWidth` 表达式里的无名 `+ 140` 全部纳入 `BookingConfig`，新增字段 `COLUMN_WIDTH_PX` / `TOTAL_DAYS` / `VISIBLE_COLUMNS` / `LABEL_COLUMN_WIDTH_PX`，命名按职责自描述，去掉原有未使用的 `visibleColumnsBuffer`。
-   - **表头色下沉到 Token 层**：原 `bookingHeaderBackground = '#e8f4fc'` 本质是纯静态视觉规格，从未在运行时被外部写入，留在 JS 配置里只能让组件以 inline style 注入并阻断主题切换扩展点。改造为 `styles/tokens.css` 新增 `--color-bg-booking-header`，`BookingGrid.module.css` 的 `.headerLabel` / `.headerDays` 直接消费 `var(--color-bg-booking-header)`；`BookingConfig` 类型与 `BOOKING_CONFIG` 单例彻底删除该字段，组件层不再注入 `style={{ background: ... }}`。结果：表头色与项目其他视觉规格走同一条 token 通道，未来 dark mode / 多品牌主题挂载主题类即可整体换肤，组件与配置零改动。
-   - **常量命名规范对齐**：`BookingConfig` 接口字段与 `BOOKING_CONFIG` 单例字段统一采用 `UPPER_SNAKE_CASE`（如 `COLUMN_WIDTH_PX` / `DATE_RANGE_START` / `BOOKING_HEADER_BACKGROUND`），与运行时 state 的驼峰命名形成视觉区分，调用点一眼即可识别"这是编译期已知、不可变的配置常量"，降低误改风险；常量本身命名沿用 `BOOKING_CONFIG` 全大写惯例。
-   - **消费方改造**：`BookingGrid` 通过结构化解包从 `BOOKING_CONFIG` 取所需字段并就地使用，删除文件级 `COLUMN_WIDTH_PX` / `TOTAL_DAYS` 局部常量；`useVisibleRange` 同样直接 `import` 消费，去掉 hook 内部的 `COLUMN_WIDTH_PX` / `VISIBLE_COLUMNS` 复制品；`RoomRow` 保留显式 props 接口（`columnWidthPx` / `dateRangeStart` / `totalDays`，驼峰）由 `BookingGrid` 透传，保持单向数据流与可注入接口，便于复用与单测 —— 即使 `totalDays` 当前未被组件直接消费也保留为契约字段，避免未来扩展时反复增删 props。
-   - **效果**：单一事实来源 —— 改 48 / 30 / 14 / 140 中任何一项只需在 `BOOKING_CONFIG` 改一处即可，跨文件视觉漂移风险归零；同时类型与命名抽象层级对齐 Booking 域，与 _app.tsx 注释 / `lib/bookingConfig` 头注释 / DECISIONS 第 5 条引用全部同步更新。
-   - **覆盖清单**：`git mv lib/appConfig.ts → lib/bookingConfig.ts` 并改写常量；改动 `types/index.ts` / `BookingGrid` / `RoomRow` / `hooks/useVisibleRange` / `pages/_app` 共 5 个文件。`tsc --noEmit` 校验通过，无新增类型错误。
-5. 按 **「单一请求入口 + 领域 hook + 抛错型 fetcher」** 原则建立统一请求层 `lib/api.ts`，把原本散落在 4 个文件中的 SWR / fetch 样板全部收敛：
-   - **端点常量化**：新增 `API_ENDPOINTS` 对象集中所有 API 路径（`bookings` / `bookingDetail(id)` / `tickets` / `ticketRead(id)`），静态路径用常量、含参路径用函数生成；调用方禁止再写裸 URL 字面量，改路径只需在此处改一处。
-   - **抛错型 fetcher**：内部封装 `httpGet<T>` / `httpPost<T>`，强制 `res.ok` 校验，非 2xx 抛出携带 `status` 的 `HttpError`（同样 export 供上层精细分支判断）。从根本上修复原各处复制 fetcher 把 4xx/5xx 当 JSON 渲染的隐患。
-   - **领域 hook 收敛**：暴露 `useBookings()` / `useBookingDetail(id)` / `useTickets()` 三个领域 hook，调用方零样板（无需自带 fetcher、无需写 SWR key、无需手动处理 conditional key —— `useBookingDetail` 已在内部实现 id 为空时不发请求）；所有 hook 透传 `SWRConfiguration` 便于个别调用方覆盖刷新策略。
-   - **写操作模板化**：导出 `markTicketRead(mutate, ticketId)`，把"乐观更新 + 远端写入 + revalidate 兜底 + rollbackOnError"四步走模板封装在请求层；调用方仅需 `useSWRConfig().mutate` 注入即可，业务页面不再持有 SWR mutator 细节。
-   - **消费方改造**：`pages/index` / `pages/messages/index` / `Sidebar` / `BookingDrawer` 共 4 个文件移除各自的 `fetcher` / `useSWR` 直接调用，替换为对应领域 hook；`pages/messages/index` 内联的乐观更新逻辑删除（30+ 行），替换为单行 `markTicketRead(mutate, ticket.id)`。
-   - **效果**：fetcher 与 SWR key 单一事实来源；HTTP 错误统一抛出可被 SWR `onError` / 全局 ErrorBoundary 捕获；新增端点只需在 `lib/api.ts` 加 endpoint + hook 两行，调用方零侵入；4xx/5xx 渲染隐患被根除。
-   - **覆盖清单**：新增 `lib/api.ts`；改动 `pages/index.tsx` / `pages/messages/index.tsx` / `components/Sidebar/Sidebar.tsx` / `components/BookingDrawer/BookingDrawer.tsx` 共 4 个文件。`tsc --noEmit` 校验通过，仓库内除 `lib/api.ts` 外不再有 `fetch(` 或 `useSWR` 直接调用（仅 `pages/messages/index` 保留 `useSWRConfig` 以拿 mutate 引用，符合预期）。
-6. 按 **「日期处理基础设施单一事实来源 + 业务零裸 Date」** 原则建立统一日期工具层 `lib/date.ts`，把原本散落在 4 个文件、8+ 处的 `new Date()` 与时间戳手算彻底收敛：
-   - **底层选型**：引入 `dayjs`（不可变 API、< 3KB、与项目 ESM/SSR 链路兼容），相比直接封装原生 `Date`，dayjs 的 `add` / `diff` 在夏令时与时区切换边界结果稳定，且后续若需要时区 / 相对时间 / 农历能力可通过 plugin 平滑扩展，调用方零改动。
-   - **统一接口**：`lib/date.ts` 暴露 `IsoDate` 类型别名 + `today()` / `addDays(date, n)` / `diffDays(start, end)` / `formatMonthDay(date)` / `buildDayLabels(start, length)` 五个纯函数。所有公开函数以 `YYYY-MM-DD` ISO 字符串为主输入输出类型，避免 `Date` 实例在 props / SWR 缓存 / SSR 序列化链路中的心智负担，保持纯字符串单向数据流。
-   - **跨日边界一致性 ——「锚点一次读，向下派生」**：约定 `today()` 仅在模块求值期被调用一次，赋给模块级 const 锚点（`bookingConfig.DATE_RANGE_START` / `mockData.TODAY_ANCHOR`）后所有衍生值（`DATE_RANGE_END` / `dateStr(n)`）通过 `addDays` 从同一锚点派生，禁止在组件渲染、事件回调等运行时路径上反复调用。当前项目仅这两处取锚点，Node 模块缓存使二者实际在同一进程启动时刻先后毫秒内完成，工程上等价于单例；约定写在 `today()` 注释中，新增调用点遵循同一约束即可避免漂移。`BookingGrid` / `RoomRow` 的窗口计算改由父级透传 `DATE_RANGE_START`，组件本身不再持有"今天"的概念。
-   - **手算样板根除**：`RoomRow.useMemo` 内 4 处 `(new Date(a) - new Date(b)) / 86400000` 替换为单行 `diffDays(dateRangeStart, b.checkIn)`；同时把原"先两次 filter 内 new Date、再两次 map 内 new Date"的双倍计算合并为"先 map 一次、再 filter"的单次遍历，消除每条预订条 4 次冗余 `Date` 构造的性能浪费。
-   - **格式化下沉**：`BookingGrid.getDayLabels` 中的 `${d.getMonth()+1}/${d.getDate()}` 字符串拼接改为 `buildDayLabels` 调用，未来切语言 / 改格式（如 `MM-DD` / `D MMM`）只需改 `lib/date.ts` 一处，业务零侵入。
-   - **效果**：仓库内除 `lib/date.ts` 外**零** `new Date(` 运行时调用（`grep` 验证残留仅为注释中的反引号引用）；日期处理具备统一替换点、单一基准时间、可测试纯函数、可扩展插件机制四项基础设施特性。
-   - **覆盖清单**：新增 `lib/date.ts`；改动 `lib/bookingConfig.ts` / `lib/mockData.ts` / `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/RoomRow.tsx` 共 4 个文件；`package.json` 新增依赖 `dayjs`。`tsc --noEmit` 校验通过，无新增类型错误。
-7. 按 **「URL 即真理来源 + SSR 首屏兜底」** 原则把 BookingDrawer 选中态从组件本地 `useState` 上提至路由 query，与 `/messages` 的 `ticketId` 策略对齐，整站统一"路由式 UI"范式：
-   - **状态归属上提**：删除 `pages/index.tsx` 内 `useState<Booking | null>` 持有的 `selectedBooking`，改由 `useRouter().query.bookingId` 派生：`bookings?.find(b => b.id === currentBookingId) ?? null`。Drawer 开合不再有独立的 React state，URL 是唯一事实来源，刷新 / 分享 / 前进后退三类入口的还原路径完全一致，杜绝"组件 state ↔ URL"双真理来源漂移。
-   - **SSR 首屏兜底**：新增 `getServerSideProps` 从 `context.query.bookingId` 注入 `initialBookingId`，覆盖客户端水合前 `useRouter().query` 为空对象的初次渲染窗口，避免 `?bookingId=xxx` 直链访问时首帧 Drawer 闪烁；与 `/messages` 的 `initialTicketId` SSR 模式同构。
-   - **关键边界 ——「兜底仅作用于水合前」**：派生 `currentBookingId` 必须以 `router.isReady` 为分水岭：水合前用 `initialBookingId` 兜底首帧；水合完成后严格以 `router.query.bookingId` 为单一事实来源（`undefined` 即关闭）。若图省事写成 `(router.query.bookingId as string) ?? initialBookingId`，关闭 Drawer 时 query 中 `bookingId` 被移除变为 `undefined`，`??` 会立即回退到 SSR 注入的旧值，Drawer 永远关不掉 —— 这是把 SSR 兜底误用为长期回退源造成的双真理来源回归。
-   - **导航语义收敛**：点击 Booking 调用 `router.push({ query: { ...query, bookingId } }, undefined, { shallow: true })`，关闭 Drawer 通过解构剔除 `bookingId` 后 `push` 回净化 query；`shallow: true` 保证不触发 `getServerSideProps` 二次执行，URL 切换零网络代价。保留其余 query 参数（如未来可能并存的过滤器），关闭 Drawer 不会误清。
-   - **下游零侵入**：`BookingDrawer` 接口（`booking` / `onClose` props）保持不变，详情接口 `useBookingDetail(booking?.id)` 自然按新选中项重新发起 SWR 请求，缓存命中即时复用；`BookingGrid` 的 `onBookingClick` 契约不变，`pages/index.tsx` 内部把回调从 `setSelectedBooking` 替换为 `openBooking` 即可，调用层零感知。
-   - **效果**：(a) 用户在 Drawer 打开状态刷新页面，选中态精确还原；(b) 链接 `?bookingId=xxx` 可直接分享，他人打开即定位到同一 Booking；(c) 浏览器前进/后退按钮可在 Drawer 开合两态间往返；(d) 与 `/messages` 形成统一的"URL 驱动 UI"心智模型。
-   - **覆盖清单**：改动 `pages/index.tsx` 单文件（新增 `getServerSideProps`、改用 `useRouter` 派生选中态、移除本地 `useState`）。`tsc --noEmit` 校验通过，无新增类型错误。
-8. 按 **「枚举完备性由类型系统强制」** 原则重构 `getStatusPillClass`，把原 `if/else` 串行分支改造为 `Record<BookingStatus, string>` 查表：
-   - **签名收紧**：函数入参由 `status: string` 改为 `status: BookingStatus`，从根源杜绝外部传入未知字符串绕过分支检查的可能。
-   - **查表替换分支**：新增 `STATUS_PILL_CLASSES: Record<BookingStatus, string>`，TS 静态强制枚举所有成员都被覆盖；`getStatusPillClass` 退化为单行 `STATUS_PILL_CLASSES[status] ?? styles.statusPillDefault`。新增枚举成员时若忘记补齐映射，编译期即报错，issue 8 类问题不会再以同样方式复发。
-   - **CSS 与 token 同步补齐**：`tokens.css` 新增三对 pill 配色（`--color-pill-pending-bg/text` / `--color-pill-checked-out-bg/text` / `--color-pill-cancelled-bg/text`），`BookingDrawer.module.css` 新增 `.statusPillPending` / `.statusPillCheckedOut` / `.statusPillCancelled` 三个修饰类，与现有 `confirmed` / `in_house` 同构挂载，五态视觉表达对齐。
-   - **覆盖清单**：改动 `components/BookingDrawer/BookingDrawer.tsx` / `components/BookingDrawer/BookingDrawer.module.css` / `styles/tokens.css` 共 3 个文件；`tsc --noEmit` 通过。
-9. 按 **「状态域单一事实来源 + 运行时可枚举」** 原则收敛 `BookingStatus`：
-   - **类型形态升级**：`BookingStatus` 由 string union 改为 string `enum`（成员值与原字面量一致：`Confirmed='confirmed'` / `Pending='pending'` / `InHouse='in_house'` / `CheckedOut='checked_out'` / `Cancelled='cancelled'`），保持线缆兼容（mock / 服务端 payload 无需迁移）；同时获得 nominal 类型与运行时可枚举句柄两项能力，业务代码不再写裸字面量 `'in_house'`，改用 `BookingStatus.InHouse`。
-   - **展示元数据集中**：新增 `lib/bookingStatus.ts` 作为状态域单一模块，承载 `BookingStatus` 枚举 + `STATUS_LABELS`（label 文案）+ `STATUS_COLOR_VARS`（→ token 变量映射）+ `STATUS_FALLBACK_COLOR` + `STATUS_PILL_CLASS_NAMES`（→ CSS Module key 名）；所有派生表类型均为 `Record<BookingStatus, string>`，新增枚举成员时编译器强制补齐所有派生表，从结构上根除"枚举漏写不报错"的隐患（issue 8 同类问题在此处也获得拦截）。
-   - **CSS Module 解耦设计**：`STATUS_PILL_CLASS_NAMES` 只持有 key 名字符串（如 `'statusPillConfirmed'`），不直接持有 `styles.statusPillConfirmed` 解引用结果；调用方写 `styles[STATUS_PILL_CLASS_NAMES[status]] ?? styles.statusPillDefault` 完成最终绑定。这样状态域模块不与任何具体 CSS Module 文件耦合，未来多组件复用同一映射也无需改造。
-   - **下游接入**：`types/index.ts` 仅 re-export `BookingStatus` 保持调用路径不变；`lib/mockData.ts` 字面量统一替换为 `BookingStatus.X`；`components/BookingGrid/RoomRow.tsx` 删除自有 `STATUS_COLOR_VARS` / `STATUS_FALLBACK_COLOR` 副本，改 `import` 共享导出；`components/BookingDrawer/BookingDrawer.tsx` 删除自有 `STATUS_LABELS` 与 `STATUS_PILL_CLASSES` 副本，`getStatusPillClass` 退化为单行 `styles[STATUS_PILL_CLASS_NAMES[status]] ?? styles.statusPillDefault`。
-   - **效果**：状态新增 / 删除 / 改名只需在 `lib/bookingStatus.ts` 改一处，label / 网格色 / pill class 三表通过 `Record<BookingStatus, …>` 自动跟随；运行时 `Object.values(BookingStatus)` 可直接遍历五态（未来 filter / form select 等场景零样板）。
-   - **覆盖清单**：新增 `lib/bookingStatus.ts`；改动 `types/index.ts` / `lib/mockData.ts` / `components/BookingGrid/RoomRow.tsx` / `components/BookingDrawer/BookingDrawer.tsx` 共 4 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
-10. 按 **「URL 仅承载最小定位信息 + 派生量不入路由」** 原则把 `/messages` 路由 query 收敛到 `ticketId` 单参数：
-    - **冗余参数移除**：`handleTicketClick` 由 `router.push('/messages?ticketId=X&houseId=Y')` 改为 `router.push('/messages?ticketId=X')`。`houseId` 在数据层可通过 `tickets.find(t => t.id === ticketId).houseId` 直接派生，无需作为独立路由参数维护；现有页面渲染（`activeTicket.houseName`）原本就走的是 ticket 查表路径，并未消费 `query.houseId`，改造对 UI 行为零影响。
-    - **不变量收敛**：双参数路由下"`houseId` 必须等于 `tickets[ticketId].houseId`"是一条隐式不变量，任何外链 / 用户手改 URL 都可能违反；单参数路由下该不变量自动成立，无需运行时校验。
-    - **链接面进一步收窄**：URL 长度更短、语义更窄、外部分享时不会暴露内部 `house` 标识；未来即使数据模型把 `ticket.houseId` 重构为多对一关联，前端路由层也无需跟随调整。
-    - **覆盖清单**：改动 `pages/messages/index.tsx` 单文件（`handleTicketClick` 简化 + 顶部状态归属注释同步收口）；`tsc --noEmit` 校验通过。
-11. 按 **「detail（远端权威） > booking（首屏占位）」事实来源优先级** 收敛 `BookingDrawer` 共有字段渲染路径：
-    - **统一取值入口**：在组件顶部以 `const view = detail ?? booking` 合成单一视图模型，Guest / Room / Dates / Status / Amount 五个共有字段全部改由 `view.*` 渲染，detail 命中后立即切换到服务端权威数据，从结构上根除"列表快照 vs 详情接口"双口径同屏漂移。
-    - **类型层零分支兼容**：`BookingDetail extends Booking` 的继承关系使得 `detail ?? booking` 在 TS 视角下天然收敛为 `Booking` 子类型，无需在每个字段处写三元判空，也避免后续 detail 扩展字段时还要逐处补充回退逻辑。
-    - **乐观首屏语义保留**：`booking` 仍作为 Drawer 打开瞬间的占位（`useBookingDetail` 拉取期间 detail 为 undefined），保证抽屉不会出现整面骨架屏抖动；附加详情区（Email / Phone / Source / Payment / Requests）继续严格依赖 detail 渲染，loading / 缺失态各自有占位文案，与共有字段的「占位 → 权威」切换互不干扰。
-    - **数据契约文档化**：把"detail > booking"优先级约定写入组件头注释，明确 booking 的角色仅为「列表视图快照、首屏占位」，detail 才是事实来源；新增字段时按同一约定接入即可，避免再次出现共有字段事实来源未声明的退化。
-    - **覆盖清单**：改动 `components/BookingDrawer/BookingDrawer.tsx` 单文件；`tsc --noEmit` 校验通过，无新增类型错误。
-12. 按 **「异步态视图层基础设施 + 错误捕获分层」** 原则建立统一的 loading / error / empty 渲染契约与全局错误边界，把原本散落在 4 个文件中的状态分支收敛到统一的 `<AsyncBoundary>` 与 `<ErrorBoundary>`：
-    - **统一异步态外壳（`components/Async/AsyncBoundary.tsx`）**：直接消费 SWR 返回的 `{ data, error, isLoading }` 三元组，按 `error > loading > empty > success` 优先级路由到对应占位（错误优先于 loading 是因为 SWR 失败时会保留 `isLoading=false` + `error` 对象，写反则错误态被吞）。采用 render-prop（`children: (data: T) => ReactNode`）签名，数据未就绪时不构造叶子组件，TypeScript 在闭包内自然收敛为非空 `T`，调用方零样板、零 `data!` 强断言。
-    - **通用占位组件**：同模块导出 `<Loading>`（块级 spinner + 文案，`role=status` + `aria-live=polite`）、`<InlineLoading>`（行内紧凑场景，如"标题 + 加载中"）、`<ErrorMessage>`（块级错误，`role=alert`，可选 Retry 按钮）、`<EmptyState>`（弱化空态文案）四件套，外观全部由 `AsyncBoundary.module.css` 消费 tokens 控制，与项目设计系统天然对齐；`AsyncBoundary` 默认占位即调用这四件套，业务侧通常零定制即可使用。
-    - **应用根级错误边界（`components/Async/ErrorBoundary.tsx`）**：以 React 类组件实现 `getDerivedStateFromError` + `componentDidCatch`，捕获渲染期未处理异常避免白屏；默认降级 UI 复用 `<ErrorMessage>` 保持视觉一致，`reset` 回调清空 error state 配合用户重试或路由切换即可恢复。组件头注释明确职责边界 —— 仅处理"渲染抛错"，SWR 网络错误由 `AsyncBoundary` 在视图层处理、不冒泡到此处；事件回调 / setTimeout / Promise 内部抛错按 React 文档约定属业务自行处理范畴。
-    - **请求层全局错误捕获（`SWRConfig.onError`）**：在 `pages/_app.tsx` 用 `<SWRConfig>` 包裹根组件，挂载 `onError(error, key)` 钩子作为全局观测点（当前实现走 `console.error`，注释中标注未来可接入 Sentry / Toast）。请求层错误同时也由视图层 `<AsyncBoundary>` 就近渲染降级 UI，二者职责互补：observability 走全局回调，user-facing recovery 走就近边界。
-    - **请求层默认指数退避重试（`SWRConfig.onErrorRetry`）**：暂态错误（5xx / 网络抖动 / fetch reject）默认按指数退避自动重试 3 次，节奏 ≈ 1s → 2s → 4s，单次封顶 30s，所有 `useSWR` 自动获得无须各自配置；4xx 客户端错误（HttpError.status ∈ [400, 500)）一律跳过自动重试 —— 资源不存在 / 鉴权失败 / 参数错误等场景重试只会放大错误曲线，应直接进入错误态由用户决定下一步。重试参数（`SWR_RETRY_COUNT` / `SWR_RETRY_BASE_INTERVAL_MS` / `SWR_RETRY_MAX_DELAY_MS`）抽为模块级常量，便于单测注入与未来按域差异化覆盖（如重要写操作单独提高 retryCount）。耗尽重试预算后由 `<AsyncBoundary>` 的 Retry 按钮提供手动二次恢复入口，形成"自动退避 → 手动重试"两段式恢复链。
-    - **消费方改造（4 文件）**：
-      - `pages/index`：把"页头 `<span>Loading...</span>` + 网格区 `bookings ? <BookingGrid> : <placeholder Loading.../No bookings found.</placeholder>`"两段三态混写替换为单层 `<AsyncBoundary>`，通过 `isEmpty={list => list.length === 0}` 区分 empty 与 loading，并把页头 inline 提示降级为"仅 revalidating 时展示 `<InlineLoading>`"，避免与下方主态重复发声。
-      - `BookingDrawer`：附加详情区原"`isLoading && <span>loading...</span>` + `detail ? <Rows> : !isLoading ? <empty> : null`"三层嵌套替换为单层 `<AsyncBoundary>`，标题侧 inline loading 改用 `<InlineLoading>` 复用同一视觉语言；`onRetry={mutate}` 让用户在 detail 拉取失败时可手动重试，不再需要关闭重开抽屉。
-      - `pages/messages`：原本 `tickets?.map(...)` 在 loading / error 路径上完全静默渲染空列表 —— 现以 `<AsyncBoundary>` 包裹列表渲染，loading 显示 spinner、error 显示带 Retry 的错误卡片、tickets 为空数组时显示 EmptyState，三态视觉契约对齐。
-      - `pages/_app`：根布局加一层 `<SWRConfig onError>` + `<ErrorBoundary>`，所有页面无须各自处理。
-    - **死样式清理**：`pages/index.module.css` 的 `.loadingHint` 与 `BookingDrawer.module.css` `.loadingHint` 的字号 / 颜色规则因迁移到 `<InlineLoading>` 内部而成为死代码，已分别删除 / 收敛为仅承担留白的槽位类。
-    - **a11y 前置**：所有占位组件就位即附 `role` / `aria-live` 属性，未来 issue 16 的 a11y 改造可直接复用这套基础设施，无需返工。
-    - **效果**：(a) loading / error / empty 三态在四个消费点视觉与文案统一，新增任何 SWR 调用接入 `<AsyncBoundary>` 即开箱获得三态渲染；(b) 错误态在视图层从"全局缺席"变为"就近可见 + 可重试"；(c) 渲染期意外异常不再白屏；(d) 全局观测点单一，便于后续接入 Sentry / Toast / Datadog。
-    - **覆盖清单**：新增 `components/Async/AsyncBoundary.tsx` / `components/Async/AsyncBoundary.module.css` / `components/Async/ErrorBoundary.tsx` 共 3 个文件；改动 `pages/_app.tsx` / `pages/index.tsx` / `pages/index.module.css` / `pages/messages/index.tsx` / `components/BookingDrawer/BookingDrawer.tsx` / `components/BookingDrawer/BookingDrawer.module.css` 共 6 个文件；`tsc --noEmit` 与 `next build` 均通过，无新增类型错误。
-13. 按 **「按 roomId 一次性分桶 + 子集引用稳定 + 子组件 React.memo」** 原则重构 `BookingGrid` 的预订派发路径，消除内联 filter 的引用抖动与重复扫描：
-    - **分桶替代 N 次 filter**：在 `BookingGrid` 内以 `useMemo` 维护 `bookingsByRoom: Map<string, Booking[]>`，依赖 `[bookings, roomUnits]`，单次 O(M) 遍历建立 `roomId → Booking[]` 索引；`roomUnits.map` 渲染时改用 `bookingsByRoom.get(room.id) ?? EMPTY_BOOKINGS` 拿子集，将原 O(N×M) 重复扫描收敛为 O(M) 分桶 + O(1) 命中。
-    - **子集引用跨帧稳定**：分桶 Map 在 `bookings` / `roomUnits` 不变时引用稳定，每个房型对应的 `Booking[]` 子数组也跟随稳定；滚动等高频重渲染路径下 `RoomRow` 的 `bookings` prop 引用不再每帧重置。
-    - **未命中兜底引用稳定**：模块级常量 `EMPTY_BOOKINGS: Booking[] = []` 作为 `Map.get` 未命中的回退值，避免每次渲染都构造新的 `[]` 字面量破坏 `React.memo` 的浅比较。
-    - **`RoomRow` 接入 `React.memo`**：本条配套把 `RoomRow` 默认导出改为 `memo(RoomRowImpl)`，props 浅比较命中即跳过整行渲染；分桶产出的稳定子集 + memo 形成闭环 —— 当只有滚动 / 选中态等与某行无关的状态变化时，未受影响的行整体跳过重渲染。
-    - **效果**：在 SWR `bookings` 不变的所有场景（滚动、Drawer 开合、其它行 hover、查询参数变化等），所有 `RoomRow` 的 `bookings` prop 引用恒定；配合第 14 条删除 `hoveredCell` 状态后，BookingGrid 自身的重渲染频次也大幅下降。
-    - **覆盖清单**：改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/RoomRow.tsx` 共 2 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
-14. 按 **「Hover 视觉态 CSS 化 + 日格几何层独立 memo + RoomRow 整体 memo」** 原则重构 `RoomRow` 的渲染结构，把无业务副作用的 hover 状态彻底移出 React 渲染链路，并按"几何层"与"数据层"做关注点分离：
-    - **Hover 下沉到 CSS 伪类**：`RoomRow.module.css` 把 `.rowHovered` / `.cellHovered` 替换为 `.row:hover` / `.cell:hover`，行 / 日格 hover 由浏览器原生伪类匹配触发；同步删除 `BookingGrid` 中 `useState<HoveredCell>` 与 `setHoveredCell`、`RoomRow` 中 `hoveredCell` / `onHoverCell` props、`HoveredCell` 类型导出、单元格 `onMouseEnter` / `onMouseLeave` 事件绑定共一整条链路。鼠标每次进出格子触发的 `setState` → 全部 `RoomRow` 重渲染开销归零，与"hover 只该影响一格视觉"的语义对齐。
-    - **`RoomRow` 拆为「行容器 + 几何层 `<DayCells>` + 数据层 `<BookingBars>`」三层，子层各自 `React.memo`，按"几何 / 数据"分层做差异化虚拟化**：
-      - **几何层 `<DayCells>`：全量渲染、永不重渲染**。仅消费 `totalDays` / `columnWidthPx` 两个模块级常量（来自 `BOOKING_CONFIG`，跨整个应用生命周期不变），与 `bookings` 数据、滚动状态完全正交；props 跨帧恒定意味着 memo 浅比较永久命中 —— 无论 SWR 数据刷新还是网格横滚，本层 DOM 都不会重渲染。日格全量渲染（30 列 / 行）的成本极低，但换来"几何层零重渲染"的稳定基线。
-      - **数据层 `<BookingBars>`：按窗口过滤 + 独立 memo**。把 `visibleBookings` 的 `useMemo` 计算（按 `dateRangeStart` 计算 dayIndex 跨度 + 按 `visibleStartIndex` / `visibleEndIndex` 过滤 + 状态色映射）与 bar 渲染整体抽离到独立 memo 子组件；当父级 `RoomRow` 因无关 prop（如父级回调引用变化）浅比较失败而重渲染时，`BookingBars` 的 props 若未变即跳过 `visibleBookings` 重新计算与 DOM 重渲染。同时该层可对"给定 bookings × 窗口 → 渲染子集与定位"契约做独立单测，不依赖 RoomRow。
-      - **差异化虚拟化策略**：bar 数量在长尾房间历史预订堆积场景下可能远大于日格数（每行数十至数百条），保留窗口过滤是数据层的合理虚拟化；几何层（30 cell / 行）量级小且常量化，全量渲染换稳定 memo 命中。"几何全量、数据窗口"两套策略各自服务于其层的特点。
-      - **行容器瘦身**：`RoomRow` 自身退化为纯布局容器（label + timeline），不再持有任何渲染逻辑或 `useMemo`，所有重渲染敏感代码集中到两个子层。
-      - **关注点分离**：`visibleStartIndex` / `visibleEndIndex` 仅下发到 `BookingBars`，不再透给 `DayCells`；几何层与数据层各自决定是否需要虚拟化、各自决定 memo 依赖项，互不耦合。
-    - **`RoomRow` 整体 `React.memo`**：默认导出改为 `export const RoomRow = memo(RoomRowImpl)`，与第 13 条的子集引用稳定化共同生效；上层无关行（如其它行的视觉变化、Drawer 开合）触发的 `BookingGrid` 重渲染下，`RoomRow` 浅比较命中即整体跳过。
-    - **副产物清理**：移除调试遗留 `console.log("render", rowId)` 与不再使用的 `clsx` 依赖；`HoveredCell` 类型不再导出；`BookingGrid.tsx` 头注释同步更新"状态归属"段（不再持有任何 hover 相关 React 状态）。第 3 条原本下沉到 `BookingGrid` 本地的 `hoveredCell` state 至此被进一步消除，回归"无状态网格 + CSS 伪类"的最简形态。
-    - **效果**：(a) 鼠标在网格内悬停操作不再产生任何 React 渲染；(b) SWR `bookings` 刷新时仅 booking bar 层重渲染，日格背景层稳定不动；(c) 与第 13 条共同形成完整的"分桶 → 子集稳定 → memo 命中 → 子组件分层"重渲染抑制链路，为后续问题 15（sticky）/ 19（a11y）改造留出干净的渲染基线。
-    - **覆盖清单**：改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/RoomRow.tsx` / `components/BookingGrid/RoomRow.module.css` 共 3 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
-15. 按 **「单一滚动容器 + position: sticky 双向吸附 + 渲染口径统一」** 原则重构 `BookingGrid` 的滚动 / 表头模型，把首行 / 首列吸附从"双 container 手动同步"反模式还原为浏览器原生 CSS 行为：
-    - **单一滚动容器**：把 `.header` 从 `.root` 的 flex 兄弟节点下沉到 `.body` 内层 wrapper（与全部 RoomRow 同级），`.body` 成为整个网格的唯一滚动事件源；删除 `.headerDays` 上的 `overflow: hidden` 与 `useVisibleRange` 在表头的窗口截断分支，原"双 scroll container + 隐式 scrollLeft 同步"的脆弱契约彻底消失，未来无须任何 JS 监听粘合两个滚动条。
-    - **首行 sticky-top**：`.header` 设 `position: sticky; top: 0; z-index: 3`，纵滚时持续贴附 `.body` 视口顶部；背景显式设为不透明 `var(--color-bg-elevated)`，避免 body 内容滑过表头时透出。
-    - **首列 sticky-left**：`.headerLabel` 与 `RoomRow .label` 设 `position: sticky; left: 0`，横滚时贴附 `.body` 视口左侧；同样以不透明背景 (`--color-bg-booking-header` / `--color-bg-base`) 防止下层内容穿透。
-    - **角落格双向吸附**：`.headerLabel` 同时叠加 `sticky-top`（继承自父级 `.header`）+ `sticky-left`，构成"角落始终可见"的二维吸附行为；通过 `.headerLabel` 在 `.header` 内 z-index = 1 + 父级 `.header` 在 body 内 z-index = 3 的层级组合，确保两轴同时滚动时角落格永远盖在十字交叉点最上层。
-    - **二维 z-index 层级**（`.body` 滚动上下文内）：4（角落 `.headerLabel` 的全局等效层级）> 3（表头 `.header`）> 2（行标签 `.label`）> 1（预订条 `.bar`）> 0（日格 `.cell`）—— 形成清晰的"角落 → 表头 → 标签列 → 数据条 → 几何格"覆盖栈。其中 `.bar` z-index 由 2 降为 1 以让位给 sticky-left 标签列，避免横滚时预订条从左侧穿透到房型名上方造成视觉错位。
-    - **表头全量渲染口径统一**：`.headerDays` 不再消费 `visibleRange.startIndex / endIndex`，改为 `Array.from({ length: TOTAL_DAYS })` 渲染全部 30 个日期标签，与第 14 条 DayCells 的全量策略对齐 —— 横滚时表头日期与下方日格以 flex 等宽栅格自然对齐，列对应关系在任意 scrollLeft 都精确成立，扩展时间轴标尺 / 节假日跨视口高亮等场景的语义基础也随之具备。
-    - **`useVisibleRange` 角色收窄**：仅供 `BookingBars` 数据层做窗口过滤，不再驱动表头视图渲染；表头与该 hook 解耦，减少了一处隐式耦合点，hook 的职责回归"viewport scroll → visibleIndex"单一映射。
-    - **a11y 前置**：sticky 改造保留了语义结构（表头依然在 DOM 树前部、行内首列依然是房型标签），为后续 issue 19 引入 `<table>` / `role="grid"` 的 ARIA 语义改造留出干净基线，不会被 sticky 实现细节绑死。
-    - **效果**：(a) 横滚时表头日期与下方日格全程列对位，用户读图无须再回拉对应；(b) 纵滚时房型名贴左固定，行归属一目了然；(c) 网格滚动逻辑回归浏览器原生 CSS 行为，不再依赖任何 JS 状态同步；(d) 与第 13 / 14 条共同形成"分桶 → memo → 子组件分层 → sticky 吸附"的完整渲染基线，为问题 19（a11y）/ 20（单测 / E2E）改造留出干净的可观测起点。
-    - **覆盖清单**：改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/BookingGrid.module.css` / `components/BookingGrid/RoomRow.module.css` 共 3 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
-16. 按 **「BookingBars 提升至 grid 层 + 几何坐标二维化 + RoomRow 收敛为纯结构层」** 原则重构滚动期间的渲染链路，把横滚下"N 行 RoomRow 函数体执行 + N 个 BookingBars 重渲染"收敛为顶层单点重渲染（对应原"如果有更多时间 #6"，已落地）：
-    - **BookingBars 整体上移到 grid 层**：新增 `components/BookingGrid/GridBookingBars.tsx`，遍历全集 `bookings` 一次性渲染所有 bar；通过 `useMemo` 维护 `roomId → rowIndex` 索引（依赖 `[roomUnits]`）将每条 bar 定位到二维坐标 `left = LABEL_COLUMN_WIDTH_PX + clippedStart × COLUMN_WIDTH_PX`、`top = rowIndex × ROW_HEIGHT_PX + BAR_OFFSET_TOP_PX`；`clippedStart = max(startDay, visibleStartIndex)` 实现"bar 跨过 visibleStart 时左缘吸附到可视窗起点"的 sticky-left 行为，guestName 在横滚中持续贴可视窗左缘可见，右缘锚定真实 endDay 由滚动容器自然裁剪。
-    - **`RoomRow` 收窄为纯几何骨架**：删除 `bookings` / `visibleStartIndex` / `visibleEndIndex` / `dateRangeStart` / `onBookingClick` 五个数据相关 props，仅保留 `rowName` / `totalDays` / `columnWidthPx` 三个跨帧稳定输入；横滚时 props 引用恒定，配合既有 `React.memo` 浅比较直接跳过 30 行函数体执行。第 14 条建立的"行容器 + 几何 / 数据双子层"结构在本轮进一步退化为"行容器 = 几何层"，数据层彻底脱离行边界。
-    - **共用定位上下文 `.rowsLayer` + `.barsLayer`**：`BookingGrid.module.css` 新增 `.rowsLayer`（`position: relative; display: flex; flex-direction: column`）作为 RoomRow 与 bar 层的共用定位参照系；`.barsLayer`（`position: absolute; inset: 0; pointer-events: none`，子元素 `pointer-events: auto`）覆盖整个行区平面，让非 bar 区域的鼠标事件穿透到底层 row / cell 保留 `:hover` 视觉态，bar 自身命中点击。z-index 沿用第 15 条层级（角落 4 > 表头 3 > 标签列 2 > bar 1 > cell 0），bar 自然被 sticky label 遮挡。
-    - **行 stride 语义对齐**：实测发现 `.row` 因 `border-bottom: 1px` 实际"行 stride"是 41px，而非 token `--size-row-height = 40px`；若误用 40 计算 bar 的 top 会每跨一行累积 -1px 漂移（rowIndex=25 处实测 -19px）。`BOOKING_CONFIG` 新增 `ROW_HEIGHT_PX: 41`（"行 stride"，= 内容高 + 底边分隔线）与 `BAR_OFFSET_TOP_PX: 6`（与 token `--size-bar-offset-top` 同步），注释中标注双源同步约束（任一侧改动需同步另一侧；未来若分隔线方案变更可迁移到 `ResizeObserver` 实测）；`BookingConfig` 类型同步扩字段并写明语义。`.barsLayer` 不再用 `padding-top` 承担 offset，因为 absolute 子元素 `top:0` 参照 padding box 顶边、`padding-top` 不会下推（注释中显式记录此 CSS 陷阱）。
-    - **效果**：横滚后控制台仅有 `BookingGrid` + `GridBookingBars` 重渲染，30 个 RoomRow 函数体执行 0 次（实测 console 仅 grid + bars 的 StrictMode 双调用）；devtools 抽样 9 条 bar 的 `bar.top - row.top` 稳定为 6（BAR_OFFSET_TOP），从 rowIndex 0 到 26 零漂移。
-    - **副产物清理**：本轮验证用的 `console.log("render row", rowId)` / `console.log("render bars")` 调试日志已随 RoomRow 中 `rowId` props 一并移除（`rowId` 仅在 console.log 内消费，删 log 后接口字段也无价值，按"精准修改"原则一并裁掉）。
-    - **覆盖清单**：新增 `components/BookingGrid/GridBookingBars.tsx`；改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/BookingGrid.module.css` / `components/BookingGrid/RoomRow.tsx` / `lib/bookingConfig.ts` / `types/index.ts` 共 5 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
-17. 按 **「bar 几何驱动改 transform: translate3d 走 GPU 合成层」** 原则进一步优化滚动开销，把 inline `left/top` 替换为合成层平移：
-    - **`GridBookingBars` 几何输出改 transform**：bar 的 `left/top` inline style 替换为 `transform: \`translate3d(${x}px, ${y}px, 0)\``；translate3d 第三参 z=0 显式声明 GPU 合成层，与 `.bar` 上的 `will-change: transform` 共同稳定开层。
-    - **`.bar` 默认位锁为 (0, 0)**：`RoomRow.module.css` 把 `.bar` 的 `top: var(--size-bar-offset-top)` 移除，显式写 `top: 0; left: 0` 让 inline transform 在 (0, 0) 起算；避免 `position: absolute` 下未声明 top/left 时回退到 auto 与 inline transform 叠加产生不可控偏移。`will-change: transform` 提示浏览器为每条 bar 建立独立合成层（当前 bar 数量 < 200，GPU 内存占用可接受）。
-    - **未做的进一步优化**：未把 `width` 也改成 `scale`（scale 会等比缩放 bar 内 padding / text / border-radius，视觉失真不可接受）；未把 scrollLeft 写入 `useRef` + `requestAnimationFrame` 走命令式 DOM 写入（当前 React 渲染开销已无可见瓶颈，命令式方案破坏声明式契约且单测复杂度上升，列入"性能 budget 真的报警再做"清单）。
-    - **效果**：滚动改写 transform 仅触发 compositor 重新摆位，跳过 layout 与 paint；filter 进出窗口的少数 bar 仍走正常 reconcile，但合成层已稳定建立，进入也直接落到 GPU 平面，不会触发其它 bar 的 layout 抖动。
-    - **覆盖清单**：改动 `components/BookingGrid/GridBookingBars.tsx` / `components/BookingGrid/RoomRow.module.css` 共 2 个文件；`tsc --noEmit` 校验通过。
-18. 按 **「`useVisibleRange` 阈值化 setState + 输出表面收窄」** 原则消除滚动事件流的 React 渲染抖动：
-    - **state 从 `scrollLeft` 改为 `startIndex`**：原实现把 `scrollLeft` 直接进 React state，每像素滚动都触发 BookingGrid 子树 reconcile；但 `startIndex = floor(scrollLeft / COLUMN_WIDTH_PX)` 实际仅在跨过列边界（每 48px 一次）时变化。改为直接存 `startIndex`，`handleScroll` 用函数式 setter 比较新旧值（`prev === next ? prev : next`）：同列内事件返回 `prev`，React 自动跳过 rerender；跨列事件返回新值才触发 BookingGrid + GridBookingBars 重渲染。setState 频率从 60Hz 像素流降到"每跨列一次"。
-    - **接口拍平 + 删 `offsetPx`**：原输出 `{ visibleRange: { startIndex, endIndex, offsetPx }, scrollLeft, handleScroll }` 中 `offsetPx` / `scrollLeft` 自第 14 / 15 条虚拟化方案迭代后已无消费者（grep 验证仅 hook 内部赋值），保留只会引导后续误用。改为拍平的 `{ startIndex, endIndex, handleScroll }`，输出表面收窄；`BookingGrid` 同步把 `visibleRange.startIndex/endIndex` 改为解构出来的 `startIndex/endIndex`。
-    - **代价权衡**：`GridBookingBars` 的 sticky-left 吸附呈现"贴 48px → 瞬跳一格"的 stepwise 行为而非像素级平滑，肉眼在常规滚速下基本无感、快滚才有轻微抖动；若需要绝对平滑，可将 scroll 写入 `useRef` + `requestAnimationFrame` 驱动 transform、彻底踢出 React 渲染链路（同 #17 的"未做"项，目前不做）。
-    - **效果**：列内 3 次滚动（0→10→30→47）日志条数 0 增量；跨列 3 次滚动（48→96→144）每次新增 `render grid` + `render bars` 共 12 条；30 个 RoomRow 全程零重渲染。
-    - **覆盖清单**：改动 `hooks/useVisibleRange.ts` / `components/BookingGrid/BookingGrid.tsx` 共 2 个文件；`tsc --noEmit` 校验通过。
+
+> 二级分类与"发现的问题"一一对应：**A 运行时缺陷** · **B 架构与状态归属** · **C 基础设施缺位（单一事实源）** · **D 网格渲染性能**
+
+### A. 运行时缺陷
+
+1. 移除单调用点的 `getBookingStatus`，`useMemo` 内就地查表 `STATUS_COLORS[b.status] ?? "#ccc"`，根除 TDZ 引用顺序问题。
+
+2. **枚举完备性查表强制**：签名收紧 `status: BookingStatus`；新增 `STATUS_PILL_CLASSES: Record<BookingStatus, string>` TS 静态强制覆盖所有成员；`getStatusPillClass` 退化为单行查表；同步补齐 3 对 pill token 与 module 类，五态视觉对齐。
+
+### B. 架构与状态归属
+
+1. **状态归属最小化**拆 Context：静态 config 抽 `BOOKING_CONFIG` 模块常量；`hoveredCell` 下沉 `BookingGrid` 本地；路由态 `useRouter().query` 派生；`unreadCount` 改 `Sidebar` 直接 `useSWR` 同 key 共享；新增 `POST /api/tickets/:id/read` + `mutate optimisticData / rollbackOnError` 闭环已读态。删除 `context/` 整目录。
+
+2. **URL 即真理源 + SSR 兜底**：`bookingId` 上提路由 query；`getServerSideProps` 注入 `initialBookingId` 覆盖水合前空 query；以 `router.isReady` 为分水岭防 `??` 误用导致关不掉；`router.push` 加 `shallow: true` 零网络代价；下游接口零侵入。
+
+3. **路由 query 收敛**：`/messages` 移除 `houseId` 仅留 `ticketId` 单参；`houseId` 由 ticket 查表派生，"`houseId` 必须等于 `tickets[ticketId].houseId`"隐式不变量自动成立，外链非法状态根除。
+
+4. **detail > booking 优先级**：组件顶部 `view = detail ?? booking` 合成单一视图模型，5 共有字段统一切 `view.*`；`BookingDetail extends Booking` 让 TS 自然收敛为 `Booking` 子类型零分支；约定写入头注释。
+
+### C. 基础设施缺位（单一事实源）
+
+1. **Design Token + CSS Module 双层重构**：`tokens.css` 暴露 7 类语义变量（color / typography / spacing / size / radius / shadow / motion）作单一视觉事实源；组件全量切 `*.module.css` 消费 token，inline style 仅保留运行时几何与配置注入；交互态拆独立类配 `cx` 切换；天然支持主题挂载。覆盖 7 组件 / 页面 + 7 份 module。
+
+2. **Booking 域常量收敛**：`AppConfig` → `BookingConfig`、`appConfig.ts` → `bookingConfig.ts`、字段命名 `UPPER_SNAKE_CASE`；`COLUMN_WIDTH_PX` / `TOTAL_DAYS` / `VISIBLE_COLUMNS` / `LABEL_COLUMN_WIDTH_PX` 单一事实源；`bookingHeaderBackground` 下沉为 `--color-bg-booking-header` token。
+
+3. **统一请求层 `lib/api.ts`**：`API_ENDPOINTS` 集中路径；`httpGet / httpPost` 强校验 `res.ok` 抛 `HttpError`；领域 hook `useBookings` / `useBookingDetail` / `useTickets` 零样板；`markTicketRead` 模板化乐观更新四步走。4 文件迁移完毕，`fetch(` 与 `useSWR` 直接调用清零。
+
+4. **统一日期工具 `lib/date.ts`**：引入 `dayjs`；暴露 `IsoDate` + `today` / `addDays` / `diffDays` / `formatMonthDay` / `buildDayLabels`；约定 `today()` 仅模块求值期取一次锚点向下派生；`RoomRow` 双倍 `new Date` 合并为单次遍历。仓库除该模块外零裸 `new Date(` 运行时调用。
+
+5. **状态域单一模块 `lib/bookingStatus.ts`**：`BookingStatus` 由 string union 升 string `enum`（线缆兼容）；集中 `STATUS_LABELS` / `STATUS_COLOR_VARS` / `STATUS_PILL_CLASS_NAMES` 三表 `Record<BookingStatus, …>`；只持 className 字符串避免与具体 module 文件耦合。下游 4 文件去副本。
+
+6. **统一异步态外壳**：新增 `<AsyncBoundary>`（render-prop、`error > loading > empty > success` 优先级）+ `<Loading>` / `<InlineLoading>` / `<ErrorMessage>` / `<EmptyState>` 四件套 + `<ErrorBoundary>`（渲染抛错降级）+ `SWRConfig.onError`（observability）+ 默认指数退避重试（1s → 2s → 4s × 3，4xx 跳过）。占位组件就位即附 `role` / `aria-live`。
+
+### D. 网格渲染性能
+
+1. **按 roomId 分桶**：`useMemo` 维护 `bookingsByRoom: Map<string, Booking[]>` 单次 O(M) 索引；模块级 `EMPTY_BOOKINGS` 作未命中兜底保引用稳定；`RoomRow` 接 `React.memo` 形成"分桶 → 子集稳定 → memo 命中"闭环。
+
+2. **Hover CSS 化 + 几何/数据双子层**：`.row:hover` / `.cell:hover` 替伪类，删 `hoveredCell` 整条 props 链路；`<DayCells>` 几何层全量渲染永不重渲染、`<BookingBars>` 数据层窗口过滤独立 memo；`RoomRow` 退化为纯几何骨架接 `React.memo`。
+
+3. **单一滚动容器 + position: sticky 双向吸附**：`.header` 下沉到 `.body` 内成兄弟节点，删 `headerDays overflow:hidden` 与窗口截断；`.header` sticky-top、首列 sticky-left、角落格双向吸附；二维 z-index：4(角落) > 3(表头) > 2(标签列) > 1(bar) > 0(cell)；表头改全量 30 列对齐 `DayCells`。
+
+4. **BookingBars 提升到 grid 层**：新增 `<GridBookingBars>` 一次遍历全集 + `roomId → rowIndex` 索引、二维坐标定位、`clippedStart` 实现 sticky-left；`RoomRow` 收为 3 props 纯几何骨架，横滚下函数体执行 0 次；`BOOKING_CONFIG` 新增 `ROW_HEIGHT_PX:41`（含 1px 分隔线）/ `BAR_OFFSET_TOP_PX:6` 解决 stride 漂移。
+
+5. **transform: translate3d 走 GPU 合成层**：bar 几何 `left / top` → `transform`，配 `will-change: transform` 稳定开层；`.bar` 默认位锁 `(0,0)` 防 absolute 回退叠加；滚动改写仅触发 compositor，跳过 layout 与 paint。
+
+6. **`useVisibleRange` 阈值化 setState**：state 由 `scrollLeft` 改 `startIndex`，函数式 setter 比较新旧值实现同列短路；输出收窄为拍平的 `{ startIndex, endIndex, handleScroll }`，删除无消费者的 `offsetPx` / `scrollLeft`。
+
 
 ## 权衡取舍
 
 <!-- 你有意识地没有做什么，为什么？ -->
-1. 手机号, 邮箱号, 金额是否做模糊处理 or 是否可见? 需要产品明确;
-2. 进入/messages 是否选中第一条未读消息? 需要产品明确;
-3. 同一个room, 若日历出现两个订阅用户日期相交的情况 or 脏数据, 前端如何兜底处理并上报日志? 需要产品给出降级策略;
-4. 在上述grid渲染优化完成后, 只有大约31*31约900 + booking几十条数据渲染, 且仅booking bar重渲染, 暂时不需要虚拟滚动
+
+1. **未引入虚拟滚动**：当前网格规模为 30 列 × 31 行 ≈ 930 cell + 数十条 bar，配合"几何层 memo 永不重渲染 + bar 提升至 grid 层 + transform 合成层"已无可见瓶颈；虚拟化会引入滚动惯性 / sticky 边界 / 焦点跳跃等额外复杂度，性能 budget 报警再做。
+
+2. **未对脏数据做前端兜底**：同 room 同窗口出现重叠预订的处理（截断 / 错层 / 上报），属业务降级策略，需产品方明确口径再实现。
+
+3. **未做敏感字段脱敏**：手机 / 邮箱 / 金额是否模糊及触发条件需产品 + 合规明确，前端不擅自决定。
+
+4. **未默认选中 `/messages` 第一条未读**：交互默认值属产品决策，未对齐前不预设以免后续返工。
+
 
 ## 如果有更多时间
 
 <!-- 你会进一步改进或调查什么？ -->
-1. 如果Booking Detail Drawer支持刷新仍然显示, 在复杂业务场景下需要考虑优先加载渲染Drawer, 而后再渲染日历路由
-2. 无极滚动日历/甘特在已有虚拟滚动后, 要看是否仍有性能问题, 若还是有问题, 可能要进一步考虑有canvas去做
-3. 日历数据分页获取
-4. UI适配多设备, 如pc小屏是否收起Sidebar, 是否适配pad和mobile
-5. 把Loading优化为骨架屏, 提升用户体验
+
+1. **测试基建**：单测覆盖 `lib/date` / `lib/api` / `lib/bookingStatus` 等纯函数；React Testing Library 覆盖 `<AsyncBoundary>` 三态、Drawer URL 驱动；E2E（Playwright）覆盖横滚 sticky / Drawer 直链；视觉回归卡住 token 漂移。
+
+2. **网格分页 / 时间窗口懒加载**：当前 30 天写死，无极滚动场景下应改为按窗口分页拉取 `bookings`，配合 SWR `keepPreviousData` 与游标 key，避免数据规模线性增长后的传输 / 内存压力。
+
+3. **多设备适配**：PC 小屏自动收起 Sidebar、平板 / 移动端日历改为竖向时间轴或卡片视图、触屏手势替代 hover 视觉态。
+
+4. **骨架屏替代 Spinner**：`<Loading>` 升级为按结构匹配的骨架，首屏感知延迟下降，特别是 Drawer 详情区。
+
+5. **Drawer 直链优先级渲染**：`?bookingId=xxx` 直链场景下并行预取 detail 与 bookings，detail 命中即先绘 Drawer，避免必须等列表 SWR 完成才能解 `find` 出 booking 占位。
+
+6. **canvas / WebGL 兜底方案**：若未来房型规模达到数千行 + 数月跨度，DOM 绝对定位 + 合成层会触达 GPU 内存与首次合成成本上限，届时评估迁移到 canvas（如 `react-konva`）渲染 bar 层、保留 DOM 仅做交互命中层。
+
+7. **observability 接入**：`SWRConfig.onError` 与 `<ErrorBoundary>.componentDidCatch` 当前仅 `console.error`，接入 Sentry 上报 + 用户侧 Toast 反馈链路。
+
+8. **a11y 完整化**：网格语义升级到 `role="grid"` + `aria-rowindex` / `aria-colindex`，键盘导航（方向键移动、Enter 打开 Drawer），屏幕阅读器朗读"X 房 Y 月 Z 日 已入住"。
