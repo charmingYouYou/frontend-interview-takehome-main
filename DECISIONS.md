@@ -15,8 +15,11 @@
 13. `BookingGrid` 内 `roomUnits.map` 渲染时以 `bookings.filter(b => b.roomUnit.roomId === room.id)` 内联派发每行的预订子集，存在两类工程问题：(1) `roomBookings` 数组在每次父组件渲染时都被重新构造，引用跨帧不稳定 —— 即便 `RoomRow` 后续接入 `React.memo`，`bookings` prop 的浅比较也会因新引用被全部命中、跳过失效；(2) 单次渲染对 `bookings` 全集做 N 次 O(M) 线性扫描（N = 房型数、M = 预订总数），整体 O(N×M) 开销在网格滚动等高频重渲染路径下被放大。需要在 `BookingGrid` 内一次性 `useMemo` 按 `roomId` 分桶为 `Map<string, Booking[]>`，消费侧改用 `Map.get` 拿到引用稳定的子集，将复杂度收敛为单次 O(M) 分桶 + O(1) 命中。
 14. `RoomRow` 的日格 hover 视觉态以 React state（`hoveredCell`）+ 单元格 `onMouseEnter` / `onMouseLeave` 实现，存在两类工程问题：(1) hover 本质是纯视觉态、无业务副作用，却被强行接入 React 渲染链路 —— 鼠标每次进出格子都会触发 `BookingGrid` `setState` → 全部 `RoomRow` 重渲染，含每行的所有日格与预订条，与"hover 只该影响一格视觉"的语义严重错配；(2) 日格背景层仅依赖 `visibleRange × columnWidthPx` 几何参数，与 `bookings` 数据完全正交，但当前实现下 SWR 数据刷新会同时触发日格层与 booking bar 层重渲染，未做关注点分离。需要 (a) 把 `.row:hover` / `.cell:hover` 下沉到 CSS Module 伪类承载，删除 `hoveredCell` JS state 与配套 props 链路；(b) 把日格背景拆为独立的 `<DayCells>` 子组件并 `React.memo`，依赖项仅为几何参数，与 booking bar 渲染解耦；(c) `RoomRow` 自身接入 `React.memo`，与第 13 点的 props 引用稳定化形成完整的"分桶 → 子集稳定 → memo 命中 → 子组件分层"重渲染抑制链路。
 15. `BookingGrid` 缺少首行（表头日期列）/ 首列（房型标签列）sticky 滚动行为，存在多类工程问题：(1) 当前布局把 `.header` 与 `.body` 拆为 `.root` 下的两个 flex 兄弟节点，`.body` 自带 `overflow: auto` 独立横滚，`.headerDays` 又显式 `overflow: hidden` —— 横滚时表头日期列与下方日格列彻底失去对应关系，用户无法读出当前列归属哪一天；(2) 纵滚时表头停留在视口顶部（因不在 `.body` 内），但行标签列（房型名）随 body 一起滚出，超过视口的房型用户无法定位当前行属于哪个房型，需反复回滚识别；(3) 现有"双 scroll container 隔离 + 表头窗口式渲染"近似模拟表头吸附，本质是布局层缺位、用 JS 状态绕行 —— 一旦未来需要 scrollLeft 同步必然要再加一层 `useEffect` 监听粘合，是典型的"用 JS 修补 CSS 应该提供的能力"反模式；(4) 表头 `.headerDays` 仅渲染 `[visibleStartIndex, visibleEndIndex]` 窗口，而 body 行的日格层经第 14 条改造后已是全量渲染，二者渲染范围口径错位 —— 即便临时同步 scrollLeft 也无法解决"表头视图不完整"的语义问题，未来扩展（时间轴标尺、节假日跨视口高亮、日期粘连提示）都会因表头缺失被卡住。
-16. BookingGrid缺少a11y
-17. 缺少单测和E2E
+16. `BookingBars` 渲染层级耦合在每行 `RoomRow` 内部，横滚链路下调度开销随房型数 N 线性放大：(1) `BookingBars` 作为每行 `RoomRow` 的子节点，横滚时 `visibleRange` 变化沿 `BookingGrid → 每行 RoomRow → 每行 BookingBars` 路径下发，尽管第 14 条已为 `RoomRow` / `DayCells` / `BookingBars` 各自接入 `React.memo`，但 `RoomRow` 的 `visibleStartIndex` / `visibleEndIndex` props 随每次滚动变化、`React.memo` 浅比较失败，N 行函数体仍要逐一执行以完成 props 转发；(2) 每行的 `BookingBars` 各自持有局部 `bookings` 子集独立 reconcile，N 个独立子组件各自跑一遍 `visibleBookings` `useMemo` 与子节点 diff，与"全网格同一份可视窗口"的语义错配；(3) bar 渲染逻辑被行边界绑死，未来如需对 bar 做跨行的统一布局（拖拽改房、跨房型分组）都要先解开行内嵌套，结构债务在累积。需把 `BookingBars` 整体上移到 grid 层，按 `(rowIndex, dayIndex)` 二维坐标统一渲染所有 bar，让 `RoomRow` 退化为纯几何骨架（props 跨帧稳定 → memo 永久命中 → 函数体执行收敛为 0）。
+17. 预订条 bar 的几何驱动以 inline `left` / `top` 注入，滚动改写走完整的 layout → paint 路径：(1) `position: absolute` + 像素级 `left/top` 改写每帧都触发浏览器重新计算 layout 与 paint，与合成线程隔离，无法享受 GPU 合成层加速；(2) 在第 16 条所述的"按列阈值跨变"路径下，每跨一列要同时移动 visibleBookings 内全部 bar 的 left/top，layout 抖动会传染给同一合成层内的其它元素；(3) 即便后续接入虚拟滚动 / 节流，"layout / paint 始终参与每帧" 这条主路径不消除，性能上限就被钉死。需要把位置驱动改为 `transform: translate3d` 并配合 `will-change: transform`，让浏览器为每条 bar 建立独立合成层，滚动改写仅触发 compositor 重新摆位，跳过 layout 与 paint。
+18. `useVisibleRange` 把 `scrollLeft` 直接作为 React state，存在两类工程问题：(1) `scrollLeft` 每像素都会随 onScroll 触发 setState，进而引发 `BookingGrid` 子树 reconcile，但实际派生量 `startIndex = floor(scrollLeft / COLUMN_WIDTH_PX)` 仅在跨过列边界（每 48px）时才变化 —— 同列内的 ~48 次 setState 全部是无效计算，与"列内滚动 hooks 应当短路"的语义错配；(2) hook 输出 `{ visibleRange: { startIndex, endIndex, offsetPx }, scrollLeft, handleScroll }` 中的 `offsetPx` / `scrollLeft` 自第 14 / 15 条虚拟化方案迭代后已无消费者（仅 hook 内部赋值），保留只会引导后续误用并扩大接口面。需要把 state 直接定义为 `startIndex`，`handleScroll` 用函数式 setter 比较新旧值实现同列短路；同时把无消费者的字段从输出表面剔除，输出收窄为拍平的 `{ startIndex, endIndex, handleScroll }`。
+19. BookingGrid缺少a11y
+20. 缺少单测和E2E
 
 ## 应用的修复
 <!-- 对于每个修复：你改变了什么，为什么，以及你选择了什么方法 -->
@@ -123,7 +126,7 @@
       - **关注点分离**：`visibleStartIndex` / `visibleEndIndex` 仅下发到 `BookingBars`，不再透给 `DayCells`；几何层与数据层各自决定是否需要虚拟化、各自决定 memo 依赖项，互不耦合。
     - **`RoomRow` 整体 `React.memo`**：默认导出改为 `export const RoomRow = memo(RoomRowImpl)`，与第 13 条的子集引用稳定化共同生效；上层无关行（如其它行的视觉变化、Drawer 开合）触发的 `BookingGrid` 重渲染下，`RoomRow` 浅比较命中即整体跳过。
     - **副产物清理**：移除调试遗留 `console.log("render", rowId)` 与不再使用的 `clsx` 依赖；`HoveredCell` 类型不再导出；`BookingGrid.tsx` 头注释同步更新"状态归属"段（不再持有任何 hover 相关 React 状态）。第 3 条原本下沉到 `BookingGrid` 本地的 `hoveredCell` state 至此被进一步消除，回归"无状态网格 + CSS 伪类"的最简形态。
-    - **效果**：(a) 鼠标在网格内悬停操作不再产生任何 React 渲染；(b) SWR `bookings` 刷新时仅 booking bar 层重渲染，日格背景层稳定不动；(c) 与第 13 条共同形成完整的"分桶 → 子集稳定 → memo 命中 → 子组件分层"重渲染抑制链路，为后续问题 15（sticky）/ 16（a11y）改造留出干净的渲染基线。
+    - **效果**：(a) 鼠标在网格内悬停操作不再产生任何 React 渲染；(b) SWR `bookings` 刷新时仅 booking bar 层重渲染，日格背景层稳定不动；(c) 与第 13 条共同形成完整的"分桶 → 子集稳定 → memo 命中 → 子组件分层"重渲染抑制链路，为后续问题 15（sticky）/ 19（a11y）改造留出干净的渲染基线。
     - **覆盖清单**：改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/RoomRow.tsx` / `components/BookingGrid/RoomRow.module.css` 共 3 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
 15. 按 **「单一滚动容器 + position: sticky 双向吸附 + 渲染口径统一」** 原则重构 `BookingGrid` 的滚动 / 表头模型，把首行 / 首列吸附从"双 container 手动同步"反模式还原为浏览器原生 CSS 行为：
     - **单一滚动容器**：把 `.header` 从 `.root` 的 flex 兄弟节点下沉到 `.body` 内层 wrapper（与全部 RoomRow 同级），`.body` 成为整个网格的唯一滚动事件源；删除 `.headerDays` 上的 `overflow: hidden` 与 `useVisibleRange` 在表头的窗口截断分支，原"双 scroll container + 隐式 scrollLeft 同步"的脆弱契约彻底消失，未来无须任何 JS 监听粘合两个滚动条。
@@ -133,9 +136,29 @@
     - **二维 z-index 层级**（`.body` 滚动上下文内）：4（角落 `.headerLabel` 的全局等效层级）> 3（表头 `.header`）> 2（行标签 `.label`）> 1（预订条 `.bar`）> 0（日格 `.cell`）—— 形成清晰的"角落 → 表头 → 标签列 → 数据条 → 几何格"覆盖栈。其中 `.bar` z-index 由 2 降为 1 以让位给 sticky-left 标签列，避免横滚时预订条从左侧穿透到房型名上方造成视觉错位。
     - **表头全量渲染口径统一**：`.headerDays` 不再消费 `visibleRange.startIndex / endIndex`，改为 `Array.from({ length: TOTAL_DAYS })` 渲染全部 30 个日期标签，与第 14 条 DayCells 的全量策略对齐 —— 横滚时表头日期与下方日格以 flex 等宽栅格自然对齐，列对应关系在任意 scrollLeft 都精确成立，扩展时间轴标尺 / 节假日跨视口高亮等场景的语义基础也随之具备。
     - **`useVisibleRange` 角色收窄**：仅供 `BookingBars` 数据层做窗口过滤，不再驱动表头视图渲染；表头与该 hook 解耦，减少了一处隐式耦合点，hook 的职责回归"viewport scroll → visibleIndex"单一映射。
-    - **a11y 前置**：sticky 改造保留了语义结构（表头依然在 DOM 树前部、行内首列依然是房型标签），为后续 issue 16 引入 `<table>` / `role="grid"` 的 ARIA 语义改造留出干净基线，不会被 sticky 实现细节绑死。
-    - **效果**：(a) 横滚时表头日期与下方日格全程列对位，用户读图无须再回拉对应；(b) 纵滚时房型名贴左固定，行归属一目了然；(c) 网格滚动逻辑回归浏览器原生 CSS 行为，不再依赖任何 JS 状态同步；(d) 与第 13 / 14 条共同形成"分桶 → memo → 子组件分层 → sticky 吸附"的完整渲染基线，为问题 16（a11y）/ 17（单测 / E2E）改造留出干净的可观测起点。
+    - **a11y 前置**：sticky 改造保留了语义结构（表头依然在 DOM 树前部、行内首列依然是房型标签），为后续 issue 19 引入 `<table>` / `role="grid"` 的 ARIA 语义改造留出干净基线，不会被 sticky 实现细节绑死。
+    - **效果**：(a) 横滚时表头日期与下方日格全程列对位，用户读图无须再回拉对应；(b) 纵滚时房型名贴左固定，行归属一目了然；(c) 网格滚动逻辑回归浏览器原生 CSS 行为，不再依赖任何 JS 状态同步；(d) 与第 13 / 14 条共同形成"分桶 → memo → 子组件分层 → sticky 吸附"的完整渲染基线，为问题 19（a11y）/ 20（单测 / E2E）改造留出干净的可观测起点。
     - **覆盖清单**：改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/BookingGrid.module.css` / `components/BookingGrid/RoomRow.module.css` 共 3 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
+16. 按 **「BookingBars 提升至 grid 层 + 几何坐标二维化 + RoomRow 收敛为纯结构层」** 原则重构滚动期间的渲染链路，把横滚下"N 行 RoomRow 函数体执行 + N 个 BookingBars 重渲染"收敛为顶层单点重渲染（对应原"如果有更多时间 #6"，已落地）：
+    - **BookingBars 整体上移到 grid 层**：新增 `components/BookingGrid/GridBookingBars.tsx`，遍历全集 `bookings` 一次性渲染所有 bar；通过 `useMemo` 维护 `roomId → rowIndex` 索引（依赖 `[roomUnits]`）将每条 bar 定位到二维坐标 `left = LABEL_COLUMN_WIDTH_PX + clippedStart × COLUMN_WIDTH_PX`、`top = rowIndex × ROW_HEIGHT_PX + BAR_OFFSET_TOP_PX`；`clippedStart = max(startDay, visibleStartIndex)` 实现"bar 跨过 visibleStart 时左缘吸附到可视窗起点"的 sticky-left 行为，guestName 在横滚中持续贴可视窗左缘可见，右缘锚定真实 endDay 由滚动容器自然裁剪。
+    - **`RoomRow` 收窄为纯几何骨架**：删除 `bookings` / `visibleStartIndex` / `visibleEndIndex` / `dateRangeStart` / `onBookingClick` 五个数据相关 props，仅保留 `rowName` / `totalDays` / `columnWidthPx` 三个跨帧稳定输入；横滚时 props 引用恒定，配合既有 `React.memo` 浅比较直接跳过 30 行函数体执行。第 14 条建立的"行容器 + 几何 / 数据双子层"结构在本轮进一步退化为"行容器 = 几何层"，数据层彻底脱离行边界。
+    - **共用定位上下文 `.rowsLayer` + `.barsLayer`**：`BookingGrid.module.css` 新增 `.rowsLayer`（`position: relative; display: flex; flex-direction: column`）作为 RoomRow 与 bar 层的共用定位参照系；`.barsLayer`（`position: absolute; inset: 0; pointer-events: none`，子元素 `pointer-events: auto`）覆盖整个行区平面，让非 bar 区域的鼠标事件穿透到底层 row / cell 保留 `:hover` 视觉态，bar 自身命中点击。z-index 沿用第 15 条层级（角落 4 > 表头 3 > 标签列 2 > bar 1 > cell 0），bar 自然被 sticky label 遮挡。
+    - **行 stride 语义对齐**：实测发现 `.row` 因 `border-bottom: 1px` 实际"行 stride"是 41px，而非 token `--size-row-height = 40px`；若误用 40 计算 bar 的 top 会每跨一行累积 -1px 漂移（rowIndex=25 处实测 -19px）。`BOOKING_CONFIG` 新增 `ROW_HEIGHT_PX: 41`（"行 stride"，= 内容高 + 底边分隔线）与 `BAR_OFFSET_TOP_PX: 6`（与 token `--size-bar-offset-top` 同步），注释中标注双源同步约束（任一侧改动需同步另一侧；未来若分隔线方案变更可迁移到 `ResizeObserver` 实测）；`BookingConfig` 类型同步扩字段并写明语义。`.barsLayer` 不再用 `padding-top` 承担 offset，因为 absolute 子元素 `top:0` 参照 padding box 顶边、`padding-top` 不会下推（注释中显式记录此 CSS 陷阱）。
+    - **效果**：横滚后控制台仅有 `BookingGrid` + `GridBookingBars` 重渲染，30 个 RoomRow 函数体执行 0 次（实测 console 仅 grid + bars 的 StrictMode 双调用）；devtools 抽样 9 条 bar 的 `bar.top - row.top` 稳定为 6（BAR_OFFSET_TOP），从 rowIndex 0 到 26 零漂移。
+    - **副产物清理**：本轮验证用的 `console.log("render row", rowId)` / `console.log("render bars")` 调试日志已随 RoomRow 中 `rowId` props 一并移除（`rowId` 仅在 console.log 内消费，删 log 后接口字段也无价值，按"精准修改"原则一并裁掉）。
+    - **覆盖清单**：新增 `components/BookingGrid/GridBookingBars.tsx`；改动 `components/BookingGrid/BookingGrid.tsx` / `components/BookingGrid/BookingGrid.module.css` / `components/BookingGrid/RoomRow.tsx` / `lib/bookingConfig.ts` / `types/index.ts` 共 5 个文件；`tsc --noEmit` 校验通过，无新增类型错误。
+17. 按 **「bar 几何驱动改 transform: translate3d 走 GPU 合成层」** 原则进一步优化滚动开销，把 inline `left/top` 替换为合成层平移：
+    - **`GridBookingBars` 几何输出改 transform**：bar 的 `left/top` inline style 替换为 `transform: \`translate3d(${x}px, ${y}px, 0)\``；translate3d 第三参 z=0 显式声明 GPU 合成层，与 `.bar` 上的 `will-change: transform` 共同稳定开层。
+    - **`.bar` 默认位锁为 (0, 0)**：`RoomRow.module.css` 把 `.bar` 的 `top: var(--size-bar-offset-top)` 移除，显式写 `top: 0; left: 0` 让 inline transform 在 (0, 0) 起算；避免 `position: absolute` 下未声明 top/left 时回退到 auto 与 inline transform 叠加产生不可控偏移。`will-change: transform` 提示浏览器为每条 bar 建立独立合成层（当前 bar 数量 < 200，GPU 内存占用可接受）。
+    - **未做的进一步优化**：未把 `width` 也改成 `scale`（scale 会等比缩放 bar 内 padding / text / border-radius，视觉失真不可接受）；未把 scrollLeft 写入 `useRef` + `requestAnimationFrame` 走命令式 DOM 写入（当前 React 渲染开销已无可见瓶颈，命令式方案破坏声明式契约且单测复杂度上升，列入"性能 budget 真的报警再做"清单）。
+    - **效果**：滚动改写 transform 仅触发 compositor 重新摆位，跳过 layout 与 paint；filter 进出窗口的少数 bar 仍走正常 reconcile，但合成层已稳定建立，进入也直接落到 GPU 平面，不会触发其它 bar 的 layout 抖动。
+    - **覆盖清单**：改动 `components/BookingGrid/GridBookingBars.tsx` / `components/BookingGrid/RoomRow.module.css` 共 2 个文件；`tsc --noEmit` 校验通过。
+18. 按 **「`useVisibleRange` 阈值化 setState + 输出表面收窄」** 原则消除滚动事件流的 React 渲染抖动：
+    - **state 从 `scrollLeft` 改为 `startIndex`**：原实现把 `scrollLeft` 直接进 React state，每像素滚动都触发 BookingGrid 子树 reconcile；但 `startIndex = floor(scrollLeft / COLUMN_WIDTH_PX)` 实际仅在跨过列边界（每 48px 一次）时变化。改为直接存 `startIndex`，`handleScroll` 用函数式 setter 比较新旧值（`prev === next ? prev : next`）：同列内事件返回 `prev`，React 自动跳过 rerender；跨列事件返回新值才触发 BookingGrid + GridBookingBars 重渲染。setState 频率从 60Hz 像素流降到"每跨列一次"。
+    - **接口拍平 + 删 `offsetPx`**：原输出 `{ visibleRange: { startIndex, endIndex, offsetPx }, scrollLeft, handleScroll }` 中 `offsetPx` / `scrollLeft` 自第 14 / 15 条虚拟化方案迭代后已无消费者（grep 验证仅 hook 内部赋值），保留只会引导后续误用。改为拍平的 `{ startIndex, endIndex, handleScroll }`，输出表面收窄；`BookingGrid` 同步把 `visibleRange.startIndex/endIndex` 改为解构出来的 `startIndex/endIndex`。
+    - **代价权衡**：`GridBookingBars` 的 sticky-left 吸附呈现"贴 48px → 瞬跳一格"的 stepwise 行为而非像素级平滑，肉眼在常规滚速下基本无感、快滚才有轻微抖动；若需要绝对平滑，可将 scroll 写入 `useRef` + `requestAnimationFrame` 驱动 transform、彻底踢出 React 渲染链路（同 #17 的"未做"项，目前不做）。
+    - **效果**：列内 3 次滚动（0→10→30→47）日志条数 0 增量；跨列 3 次滚动（48→96→144）每次新增 `render grid` + `render bars` 共 12 条；30 个 RoomRow 全程零重渲染。
+    - **覆盖清单**：改动 `hooks/useVisibleRange.ts` / `components/BookingGrid/BookingGrid.tsx` 共 2 个文件；`tsc --noEmit` 校验通过。
 
 ## 权衡取舍
 
@@ -153,4 +176,3 @@
 3. 日历数据分页获取
 4. UI适配多设备, 如pc小屏是否收起Sidebar, 是否适配pad和mobile
 5. 把Loading优化为骨架屏, 提升用户体验
-6. 把bookingbar和grid分离, 保证grid只渲染一次, 维持浏览器滚动; bookingbar通过top, left, width进行定位&重渲染

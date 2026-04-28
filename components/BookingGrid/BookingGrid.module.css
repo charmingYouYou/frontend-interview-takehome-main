@@ -87,3 +87,30 @@
   border-right: 1px solid var(--color-border-default);
   color: var(--color-text-tertiary);
 }
+
+/* 行区定位上下文：既以正常 flex 流排列所有 RoomRow，又作为 .barsLayer
+ * 的 position 参照系，让 bar 层覆盖整个二维行区平面。 */
+.rowsLayer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 预订条 bar 层：absolute 覆盖整个 .rowsLayer。bar 在行内的纵向偏移
+ * （token --size-bar-offset-top）由 bar 自身 inline top = rowIndex
+ * × ROW_HEIGHT_PX + BAR_OFFSET_TOP 注入；本层不再用 padding-top（对
+ * absolute 子元素无效，containing block 是 padding box）。
+ * pointer-events:none 让非 bar 区域的鼠标事件穿透到底层 cell / row
+ * （保留 :hover 视觉态），bar 元素自身恢复 pointer-events:auto。 */
+.barsLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.barsLayer > * {
+  pointer-events: auto;
+}

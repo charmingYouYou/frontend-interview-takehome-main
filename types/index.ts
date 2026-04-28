@@ -72,6 +72,20 @@ export interface BookingConfig {
   DATE_RANGE_END: string
   COLUMN_WIDTH_PX: number
   LABEL_COLUMN_WIDTH_PX: number
+  /**
+   * 行视觉占位高度（"行 stride"），= 内容高度 + 行底部分隔线宽度。供
+   * GridBookingBars 通过 rowIndex × ROW_HEIGHT_PX 计算每条 bar 的 top，
+   * 必须为完整 stride 而非 token --size-row-height 的内容高（详见
+   * bookingConfig 注释，少 1px 会跨行累积漂移）。
+   */
+  ROW_HEIGHT_PX: number
+  /**
+   * 预订条 bar 在行内的纵向偏移（px），与 token --size-bar-offset-top 对齐。
+   * 由 GridBookingBars 在 inline top 内累加（top = rowIndex × ROW_HEIGHT_PX
+   * + BAR_OFFSET_TOP_PX）；不能用 .barsLayer 的 padding-top 替代，因为
+   * absolute 子元素 top:0 参照 padding box 顶边，padding-top 不会下推。
+   */
+  BAR_OFFSET_TOP_PX: number
   TOTAL_DAYS: number
   VISIBLE_COLUMNS: number
 }

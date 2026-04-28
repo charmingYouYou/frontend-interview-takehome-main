@@ -75,11 +75,20 @@
 
 /* 预订条：跨日色块，背景色由组件按状态注入。z-index 高于 .cell（确保盖
  * 在日格分隔线之上），低于 .label 的 sticky-left 层级（横滚时不穿透到
- * 标签列）。 */
+ * 标签列）。
+ *
+ * 几何驱动改造：bar 的 (x, y) 位置由 GridBookingBars 通过 inline
+ * `transform: translate3d(x, y, 0)` 注入，不再使用 inline left/top。
+ * 这里显式把 top/left 锁为 0、使 transform 在 (0,0) 起点上做平移，
+ * 避免 inline transform 与不确定的 left/top 默认值（auto）叠加；
+ * 同时声明 `will-change: transform` 让浏览器为每条 bar 建立独立
+ * 合成层，横滚时位置变化只触发 compositor 平移、不再走 layout / paint，
+ * 滚动期间的开销从"重排所有 bar"收敛为"GPU 合成层重新摆位"。 */
 .bar {
   position: absolute;
+  top: 0;
+  left: 0;
   height: var(--size-bar-height);
-  top: var(--size-bar-offset-top);
   border-radius: var(--radius-sm);
   cursor: pointer;
   display: flex;
@@ -90,4 +99,5 @@
   overflow: hidden;
   white-space: nowrap;
   z-index: 1;
+  will-change: transform;
 }
